@@ -63,7 +63,9 @@ const handleLogin = async () => {
       <!-- Logo/Brand Section -->
       <div class="text-center mb-10">
         <div class="inline-flex items-center justify-center w-20 h-20 bg-blue-600 rounded-[2rem] shadow-2xl shadow-blue-500/20 mb-6 transform hover:rotate-12 transition-transform duration-500">
-          <Bot class="w-10 h-10 text-white animate-bounce" />
+          <div class="animate-bounce flex items-center justify-center">
+            <Bot class="w-10 h-10 text-white" />
+          </div>
         </div>
         <h1 class="text-4xl font-black text-slate-900 dark:text-white tracking-tight mb-2">AI Query <span class="text-blue-600">System</span></h1>
         <p class="text-slate-500 dark:text-slate-400 font-medium">เข้าสู่ระบบด้วยบัญชี Vtiger CRM ของคุณ</p>

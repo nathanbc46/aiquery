@@ -11,7 +11,8 @@ import {
   FileSpreadsheet,
   Activity,
   ArrowRight,
-  ShieldCheck
+  ShieldCheck,
+  AlertTriangle
 } from 'lucide-vue-next'
 
 const { data: authData } = await useFetch<any>('/api/auth/me')

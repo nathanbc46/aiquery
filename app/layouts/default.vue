@@ -112,7 +112,9 @@ const closeMobileMenu = () => {
       <div class="p-8">
           <div class="flex items-center gap-3 group">
             <div class="w-10 h-10 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 flex items-center justify-center text-white shadow-xl shadow-blue-500/20 group-hover:rotate-12 transition-all duration-500">
-              <Bot class="w-6 h-6 animate-bounce" />
+              <div class="animate-bounce flex items-center justify-center">
+                <Bot class="w-6 h-6" />
+              </div>
             </div>
             <div>
               <h1 class="text-xl font-black tracking-tighter text-slate-900 dark:text-white uppercase leading-none">AI-Query</h1>
@@ -248,7 +250,9 @@ const closeMobileMenu = () => {
         <div class="p-8 flex items-center justify-between">
           <div class="flex items-center gap-3">
             <div class="w-10 h-10 rounded-2xl bg-blue-600 flex items-center justify-center text-white">
-              <Bot class="w-6 h-6 animate-bounce" />
+              <div class="animate-bounce flex items-center justify-center">
+                <Bot class="w-6 h-6" />
+              </div>
             </div>
             <div>
               <h1 class="text-xl font-black tracking-tighter text-slate-900 dark:text-white uppercase leading-none">AI-Query</h1>
