@@ -1,7 +1,8 @@
 import { useDb } from '../../utils/db';
-import { aiQueryRequests } from '../../utils/schema';
+import { aiQueryRequests, aiSettings } from '../../utils/schema';
 import { eq, and, sql } from 'drizzle-orm';
 import { Parser } from '@json2csv/plainjs';
+import { DEFAULT_MAX_RESULTS_LIMIT } from '../../utils/constants';
 
 export default defineEventHandler(async (event) => {
   const query = getQuery(event);
@@ -27,26 +28,35 @@ export default defineEventHandler(async (event) => {
     if (!request) {
       throw createError({ statusCode: 404, statusMessage: 'Request not found' });
     }
+
+    // ตรวจสอบวันหมดอายุของลิงก์ดาวน์โหลด
+    if (request.expiresAt && new Date() > new Date(request.expiresAt)) {
+      throw createError({ statusCode: 410, statusMessage: 'ลิงก์ดาวน์โหลดนี้หมดอายุแล้ว (Link Expired)' });
+    }
     
-    const sqlToRun = request.generatedSql;
+    // 2. ดึงข้อมูลจาก Snapshot Storage
+    const storage = useStorage('snapshots');
+    const csv = await storage.getItem(`${requestId}.csv`);
 
-    // 2. Execute the full SQL query
-    const [rows]: any = await db.execute(sql.raw(sqlToRun));
-
-    if (!rows || rows.length === 0) {
-      return "No data found for this query.";
+    if (!csv) {
+      throw createError({ 
+        statusCode: 404, 
+        statusMessage: 'ไม่พบไฟล์ Snapshot (ไฟล์อาจถูกลบหรือยังไม่ได้สร้างตอนอนุมัติ)' 
+      });
     }
 
-    // 3. Convert to CSV
-    const parser = new Parser();
-    const csv = parser.parse(rows);
+    // 3. Increment download count
+    await db.update(aiQueryRequests)
+      .set({ downloadCount: sql`download_count + 1` })
+      .where(eq(aiQueryRequests.id, requestId));
 
-    // 4. Set headers for file download
-    setHeaders(event, {
-      'Content-Type': 'text/csv',
-      'Content-Disposition': `attachment; filename="vtiger_export_${requestId}.csv"`
-    });
-
+    // 4. Return as CSV file
+    const fileId = requestId.split('-')[0] || 'FILE';
+    const fileName = `vtiger_export_${fileId.toUpperCase()}.csv`;
+    
+    setHeader(event, 'Content-Type', 'text/csv; charset=utf-8');
+    setHeader(event, 'Content-Disposition', `attachment; filename="${fileName}"`);
+    
     return csv;
 
   } catch (error: any) {

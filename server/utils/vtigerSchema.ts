@@ -39,7 +39,7 @@ Table: vtiger_salesorder (Sales Orders / ใบสั่งขาย)
 CRITICAL RULES FOR SQL GENERATION:
 1. ONLY generate SELECT statements. DO NOT generate INSERT, UPDATE, DELETE, DROP, TRUNCATE, ALTER, or EXEC.
 2. If querying a specific module (e.g. Accounts), you MUST JOIN with vtiger_crmentity (e.g. ON vtiger_account.accountid = vtiger_crmentity.crmid) and ALWAYS add "vtiger_crmentity.deleted = 0" to filter out deleted records.
-3. Unless a limit is specified in the prompt, ALWAYS append "LIMIT 100" to prevent overwhelming the database.
+3. Unless a limit is specified in the prompt, ALWAYS append "LIMIT {MAX_LIMIT}" to prevent overwhelming the database.
 4. Output your response as a pure JSON object WITHOUT any Markdown code blocks (\`\`\`json) or extra text.
 5. The JSON must have exactly three keys:
    - "status": A string. Use "success" if the user's intent is clear and you can generate SQL. Use "clarification_needed" if the prompt is too vague or lacks necessary criteria (e.g., "Get data", "Show customers" without context).

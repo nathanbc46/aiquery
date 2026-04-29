@@ -4,7 +4,13 @@ export default defineNuxtConfig({
   future: {
     compatibilityVersion: 4,
   },
-  modules: ['@nuxtjs/tailwindcss', '@pinia/nuxt', '@vite-pwa/nuxt'],
+  modules: ['@nuxtjs/tailwindcss', '@pinia/nuxt', '@vite-pwa/nuxt', '@nuxtjs/color-mode'],
+  css: ['~/assets/css/main.css'],
+  colorMode: {
+    classSuffix: '',
+    preference: 'system',
+    fallback: 'light',
+  },
   devtools: { enabled: true },
   pwa: {
     registerType: 'autoUpdate',
@@ -36,6 +42,25 @@ export default defineNuxtConfig({
     devOptions: {
       enabled: true,
       type: 'module'
+    }
+  },
+  nitro: {
+    experimental: {
+      tasks: true
+    },
+    storage: {
+      snapshots: {
+        driver: 'fs',
+        base: './.data/snapshots'
+      }
+    },
+    tasks: {
+      'cleanup:snapshots': {
+        handler: './server/tasks/cleanup-snapshots'
+      }
+    },
+    scheduledTasks: {
+      '0 0 * * *': ['cleanup:snapshots']
     }
   }
 })

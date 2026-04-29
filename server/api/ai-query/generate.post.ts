@@ -2,8 +2,15 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { VTIGER_SCHEMA } from '../../utils/vtigerSchema';
 import { useDb } from '../../utils/db';
 import { sql } from 'drizzle-orm';
+import { getAuthSession } from '../../utils/auth';
 
 export default defineEventHandler(async (event) => {
+  // 1. ตรวจสอบสิทธิ์
+  const session = await getAuthSession(event);
+  if (!session.userId) {
+    throw createError({ statusCode: 401, message: 'Unauthorized' });
+  }
+
   const body = await readBody(event);
   const prompt = body.prompt;
 
@@ -18,12 +25,37 @@ export default defineEventHandler(async (event) => {
   }
 
   try {
+    const db = await useDb();
+    
+    // Fetch Settings
+    const { aiSettings } = await import('../../utils/schema');
+    const { eq } = await import('drizzle-orm');
+    const { DEFAULT_MAX_RESULTS_LIMIT } = await import('../../utils/constants');
+    
+    let modelName = 'gemini-1.5-flash'; // Fallback
+    let maxLimit = DEFAULT_MAX_RESULTS_LIMIT;
+    let systemInstruction = VTIGER_SCHEMA;
+    
+    try {
+      const settings = await db.select().from(aiSettings).where(eq(aiSettings.id, 'global')).limit(1);
+      const config = settings[0];
+      if (config) {
+        modelName = config.generateModel;
+        systemInstruction = config.generateSystemInstruction || VTIGER_SCHEMA;
+        maxLimit = config.maxResultsLimit || DEFAULT_MAX_RESULTS_LIMIT;
+      }
+    } catch (sErr) {
+      console.warn('Settings fetch failed, using defaults', sErr);
+    }
+
+    // Inject the dynamic limit into the system instruction
+    systemInstruction = systemInstruction.replace('{MAX_LIMIT}', maxLimit.toString());
+
     const genAI = new GoogleGenerativeAI(apiKey);
     
-    // We use gemini-1.5-pro or gemini-1.5-flash. Using flash for faster SQL generation
     const model = genAI.getGenerativeModel({ 
-      model: 'gemini-2.5-flash',
-      systemInstruction: VTIGER_SCHEMA
+      model: modelName,
+      systemInstruction: systemInstruction
     });
 
     const result = await model.generateContent(prompt);
@@ -52,43 +84,64 @@ export default defineEventHandler(async (event) => {
     const forbiddenKeywords = ['UPDATE', 'DELETE', 'DROP', 'TRUNCATE', 'ALTER', 'INSERT', 'EXEC'];
     
     for (const keyword of forbiddenKeywords) {
-      // Use regex with word boundaries \b to avoid matching "DELETED" column
       const regex = new RegExp(`\\b${keyword}\\b`);
       if (regex.test(sqlUpper)) {
         throw new Error(`Security Violation: The generated SQL contains forbidden keyword '${keyword}'.`);
       }
     }
 
-    // Connect to actual database and get real count
+    // Step 2: Get Preview Data (Limit 10)
+    const previewSql = jsonResult.sql.replace(/LIMIT\s+\d+/i, '').replace(/;$/, '') + ' LIMIT 10';
+    
+    let previewData: any[] = [];
     let previewCount = 0;
+
     try {
-      const db = await useDb();
-      // Wrap the generated SQL inside a COUNT(*) to safely count results without fetching all data
-      const countQuery = sql.raw(`SELECT COUNT(*) as total FROM (${jsonResult.sql}) AS subquery`);
-      
-      const [rows]: any = await db.execute(countQuery);
-      if (rows && rows.length > 0) {
-        previewCount = rows[0].total || 0;
-      }
+      // Get actual count first
+      const countSql = `SELECT COUNT(*) as total FROM (${jsonResult.sql.replace(/;$/, '')}) as subquery`;
+      const [countRes]: any = await db.execute(sql.raw(countSql));
+      previewCount = countRes[0]?.total || 0;
+
+      // Get preview records
+      const [rows]: any = await db.execute(sql.raw(previewSql));
+      previewData = (rows as any[]).map(row => {
+        const maskedRow: any = {};
+        for (const key in row) {
+          maskedRow[key] = maskSensitiveData(row[key]);
+        }
+        return maskedRow;
+      });
     } catch (dbError: any) {
-      console.error('Database Query Error:', dbError);
-      // Throw error if database fails, so the user knows they need to configure DATABASE_URL
-      throw new Error(`เชื่อมต่อฐานข้อมูลล้มเหลว หรือ SQL ผิดพลาด: ${dbError.message}`);
+      console.error('Preview Execution Error:', dbError);
     }
 
-    return { 
-      success: true, 
+    return {
+      success: true,
       status: 'success',
-      sql: jsonResult.sql, 
+      sql: jsonResult.sql,
       explanation: jsonResult.explanation,
-      previewCount: previewCount
+      previewCount: previewCount,
+      maxResultsLimit: maxLimit,
+      previewData: previewData
     };
 
   } catch (error: any) {
     console.error('AI Generation Error:', error);
-    return {
-      success: false,
-      error: error.message || 'Failed to generate SQL from AI'
-    };
+    throw createError({
+      statusCode: 500,
+      statusMessage: error.message || 'Failed to generate SQL'
+    });
   }
 });
+
+// Helper function to mask sensitive data
+function maskSensitiveData(value: any): string {
+  if (value === null || value === undefined) return '-';
+  const str = String(value);
+  if (str.length <= 3) return str + '***';
+  // Show first 3 chars, then mask, show last 2 chars if long enough
+  if (str.length > 7) {
+    return str.substring(0, 3) + '****' + str.substring(str.length - 2);
+  }
+  return str.substring(0, 3) + '****';
+}

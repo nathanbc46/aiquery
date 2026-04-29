@@ -2,23 +2,49 @@ import { drizzle } from 'drizzle-orm/mysql2';
 import mysql from 'mysql2/promise';
 import * as schema from './schema';
 
-let connection: mysql.Connection | null = null;
+let pool: mysql.Pool | null = null;
 
 export const useDb = async () => {
-  if (!connection) {
-    // In production, use process.env.DATABASE_URL
-    // For demo/development without a real DB yet, this will error if no DB is running.
-    // Ensure you have a valid MySQL connection string in your .env file
-    const dbUrl = process.env.DATABASE_URL || 'mysql://user:password@localhost:3306/vtiger';
+  if (!pool) {
+    const dbUrl = process.env.DATABASE_URL;
+    
+    console.log("🔌 Initializing Database Connection Pool...");
     
     try {
-      connection = await mysql.createConnection(dbUrl);
-    } catch (e) {
-      console.warn("⚠️ Failed to connect to MySQL database. Please check your DATABASE_URL in .env");
+      if (dbUrl) {
+        pool = mysql.createPool(dbUrl);
+      } else {
+        // Fallback for development
+        pool = mysql.createPool({
+          host: 'localhost',
+          user: 'root',
+          password: '',
+          database: 'vtiger',
+          waitForConnections: true,
+          connectionLimit: 10,
+          queueLimit: 0
+        });
+      }
+      console.log("✅ Database Pool initialized.");
+    } catch (e: any) {
+      console.error("❌ Database Initialization Error!");
+      console.error("Reason:", e.message);
+      pool = null;
+      throw e;
     }
   }
   
-  // Return drizzle instance, even if connection failed (it will throw on query, which is expected)
-  // We cast it so the types work nicely.
-  return drizzle(connection as mysql.Connection, { schema, mode: 'default' });
+  return drizzle(pool, { schema, mode: 'default' });
+};
+
+export const getDbStatus = async () => {
+  if (!pool) return false;
+  try {
+    const connection = await pool.getConnection();
+    await connection.ping();
+    connection.release();
+    return true;
+  } catch (e) {
+    return false;
+  }
 };
