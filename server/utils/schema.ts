@@ -37,7 +37,10 @@ export const aiQueryRequests = mysqlTable('ai_query_requests', {
   status: mysqlEnum('status', ['PENDING', 'APPROVED', 'REJECTED', 'FAILED']).notNull().default('PENDING'),
   managerId: varchar('manager_id', { length: 36 }).references(() => users.id),
   errorMessage: text('error_message'),
-  managerComment: text('manager_comment'),  // Comment เพิ่มเติมจาก Manager ตอนอนุมัติ (optional)
+  managerComment: text('manager_comment'),
+  zohoLink: text('zoho_link'),
+  zohoShareLink: text('zoho_share_link'),
+  zohoSharePassword: varchar('zoho_share_password', { length: 255 }),
   expiresAt: timestamp('expires_at'),   // วันหมดอายุของลิงก์ดาวน์โหลด (null = ไม่มีวันหมดอายุ)
   reviewedAt: timestamp('reviewed_at'),
   createdAt: timestamp('created_at').defaultNow(),
@@ -70,5 +73,17 @@ export const aiMailSettings = mysqlTable('ai_mail_settings', {
   fromEmail: varchar('from_email', { length: 255 }),
   secure: boolean('secure').default(false), // true สำหรับพอร์ต 465
   requireAuth: boolean('require_auth').default(true),
+  updatedAt: timestamp('updated_at').defaultNow().onUpdateNow(),
+});
+
+// AI Favorites Table for User Saved Queries
+export const aiFavorites = mysqlTable('ai_favorites', {
+  id: varchar('id', { length: 36 }).primaryKey(), // UUID
+  userId: varchar('user_id', { length: 36 }).notNull().references(() => users.id),
+  title: varchar('title', { length: 255 }).notNull(),
+  queryText: text('query_text').notNull(),
+  generatedSql: text('generated_sql').notNull(),
+  explanationTh: text('explanation_th'),
+  createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow().onUpdateNow(),
 });

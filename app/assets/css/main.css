@@ -9,6 +9,27 @@
     font-family: 'Outfit', sans-serif;
     @apply transition-colors duration-300;
   }
+
+  /* Global Interactive Effects */
+  button, a, [role="button"] {
+    @apply transition-all duration-200 ease-out outline-none;
+  }
+
+  button:hover:not(:disabled), 
+  a:hover, 
+  [role="button"]:hover:not(:disabled) {
+    transform: translateY(-1.5px);
+  }
+
+  button:active:not(:disabled), 
+  a:active, 
+  [role="button"]:active:not(:disabled) {
+    transform: translateY(0) scale(0.98);
+  }
+
+  button:disabled {
+    @apply cursor-not-allowed grayscale;
+  }
 }
 
 @layer utilities {

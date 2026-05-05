@@ -50,14 +50,15 @@ export default defineEventHandler(async (event) => {
       .set({ downloadCount: sql`download_count + 1` })
       .where(eq(aiQueryRequests.id, requestId));
 
-    // 4. Return as CSV file
+    // 4. Return as CSV file with UTF-8 BOM for Excel compatibility
     const fileId = requestId.split('-')[0] || 'FILE';
     const fileName = `vtiger_export_${fileId.toUpperCase()}.csv`;
     
     setHeader(event, 'Content-Type', 'text/csv; charset=utf-8');
     setHeader(event, 'Content-Disposition', `attachment; filename="${fileName}"`);
     
-    return csv;
+    // Prepend UTF-8 BOM (\uFEFF)
+    return '\uFEFF' + csv;
 
   } catch (error: any) {
     console.error('Export Error:', error);

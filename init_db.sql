@@ -14,6 +14,9 @@ CREATE TABLE IF NOT EXISTS `ai_query_requests` (
   `manager_id` varchar(36) DEFAULT NULL,
   `error_message` text DEFAULT NULL,
   `manager_comment` text DEFAULT NULL,
+  `zoho_link` text DEFAULT NULL,
+  `zoho_share_link` text DEFAULT NULL,
+  `zoho_share_password` varchar(255) DEFAULT NULL,
   -- Comment จาก Manager ตอนอนุมัติ (optional)
   `expires_at` timestamp NULL DEFAULT NULL,
   -- วันหมดอายุของลิงก์ดาวน์โหลด (NULL = ไม่มีวันหมดอายุ)
@@ -86,7 +89,19 @@ CREATE TABLE IF NOT EXISTS `ai_mail_settings` (
   `updated_at` timestamp NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
--- 6. Migration: Ensure all columns exist for existing databases
+-- 6. Table for AI Favorites (User Saved Queries)
+CREATE TABLE IF NOT EXISTS `ai_favorites` (
+  `id` varchar(36) NOT NULL,
+  `user_id` varchar(36) NOT NULL,
+  `title` varchar(255) NOT NULL,
+  `query_text` text NOT NULL,
+  `generated_sql` text NOT NULL,
+  `explanation_th` text DEFAULT NULL,
+  `created_at` timestamp NULL DEFAULT current_timestamp(),
+  `updated_at` timestamp NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  PRIMARY KEY (`id`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
+-- 7. Migration: Ensure all columns exist for existing databases
 -- เพิ่มคอลัมน์ใหม่ๆ ในกรณีที่ตารางมีอยู่แล้ว
 SET @dbname = DATABASE();
 -- Check ai_query_requests for expires_at
@@ -190,6 +205,57 @@ SET @preparedStatement = (
   );
 PREPARE stmt
 FROM @preparedStatement;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+-- Check ai_query_requests for zoho_link
+SET @tablename = 'ai_query_requests';
+SET @columnname = 'zoho_link';
+SET @preparedStatement = (
+    SELECT IF(
+        (
+          SELECT COUNT(*)
+          FROM INFORMATION_SCHEMA.COLUMNS
+          WHERE TABLE_SCHEMA = @dbname
+            AND TABLE_NAME = @tablename
+            AND COLUMN_NAME = @columnname
+        ) > 0,
+        'SELECT 1',
+        CONCAT(
+          'ALTER TABLE ',
+          @tablename,
+          ' ADD COLUMN ',
+          @columnname,
+          ' text DEFAULT NULL AFTER manager_comment'
+        )
+      )
+  );
+PREPARE stmt
+FROM @preparedStatement;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+-- Check ai_query_requests for zoho_share_link
+SET @tablename = 'ai_query_requests';
+SET @columnname = 'zoho_share_link';
+SET @preparedStatement = (
+    SELECT IF(
+        (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = @dbname AND TABLE_NAME = @tablename AND COLUMN_NAME = @columnname) > 0,
+        'SELECT 1',
+        CONCAT('ALTER TABLE ', @tablename, ' ADD COLUMN ', @columnname, ' text DEFAULT NULL AFTER zoho_link')
+      )
+  );
+PREPARE stmt FROM @preparedStatement;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+-- Check ai_query_requests for zoho_share_password
+SET @columnname = 'zoho_share_password';
+SET @preparedStatement = (
+    SELECT IF(
+        (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = @dbname AND TABLE_NAME = @tablename AND COLUMN_NAME = @columnname) > 0,
+        'SELECT 1',
+        CONCAT('ALTER TABLE ', @tablename, ' ADD COLUMN ', @columnname, ' varchar(255) DEFAULT NULL AFTER zoho_share_link')
+      )
+  );
+PREPARE stmt FROM @preparedStatement;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
 -- Check ai_settings for max_results_limit

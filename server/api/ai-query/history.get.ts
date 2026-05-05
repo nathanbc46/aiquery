@@ -1,7 +1,7 @@
 import { useDb } from '../../utils/db';
 import { aiQueryRequests, users } from '../../utils/schema';
 import { getAuthSession, requireAuthRole } from '../../utils/auth';
-import { eq, desc, count } from 'drizzle-orm';
+import { eq, desc, count, like, or, and } from 'drizzle-orm';
 
 export default defineEventHandler(async (event) => {
   try {
@@ -21,9 +21,24 @@ export default defineEventHandler(async (event) => {
 
     const { userId, role } = session;
 
-    // 1. นับจำนวนรายการ
-    // ถ้าเป็น Admin ให้เห็นทั้งหมด, ถ้าไม่ใช่ให้เห็นเฉพาะของตัวเอง
-    const whereClause = role === 'admin' ? undefined : eq(aiQueryRequests.userId, userId);
+    // 1. จัดการเงื่อนไขการค้นหา (Where Clause)
+    // - ถ้าเป็น Admin ให้เห็นทั้งหมด, ถ้าไม่ใช่ให้เห็นเฉพาะของตัวเอง
+    // - ถ้ามีการค้นหา ให้ค้นหาใน queryText หรือ id
+    const search = (query.search as string || '').trim();
+    
+    let baseCondition = role === 'admin' ? undefined : eq(aiQueryRequests.userId, userId);
+    let whereClause = baseCondition;
+
+    if (search) {
+      const searchCondition = or(
+        like(aiQueryRequests.queryText, `%${search}%`),
+        like(aiQueryRequests.id, `%${search}%`)
+      );
+      
+      whereClause = baseCondition 
+        ? and(baseCondition, searchCondition)
+        : searchCondition;
+    }
 
     const countResult = await db
       .select({ total: count() })
@@ -69,7 +84,10 @@ export default defineEventHandler(async (event) => {
           isExpired,
           time: req.createdAt ? new Date(req.createdAt).toLocaleString('th-TH') : '',
           resultCount: req.resultCount || 0,
-          downloadCount: req.downloadCount || 0
+          downloadCount: req.downloadCount || 0,
+          zohoLink: role === 'admin' ? (req.zohoLink || null) : null,
+          zohoShareLink: req.zohoShareLink || null,
+          zohoSharePassword: req.zohoSharePassword || null
         };
       })
     };

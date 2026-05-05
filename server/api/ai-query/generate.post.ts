@@ -1,5 +1,5 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { VTIGER_SCHEMA } from '../../utils/vtigerSchema';
+import { DEFAULT_GENERATE_INSTRUCTION, DEFAULT_MAX_RESULTS_LIMIT } from '../../utils/constants';
 import { useDb } from '../../utils/db';
 import { sql } from 'drizzle-orm';
 import { getAuthSession } from '../../utils/auth';
@@ -30,18 +30,18 @@ export default defineEventHandler(async (event) => {
     // Fetch Settings
     const { aiSettings } = await import('../../utils/schema');
     const { eq } = await import('drizzle-orm');
-    const { DEFAULT_MAX_RESULTS_LIMIT } = await import('../../utils/constants');
+
     
     let modelName = 'gemini-1.5-flash'; // Fallback
     let maxLimit = DEFAULT_MAX_RESULTS_LIMIT;
-    let systemInstruction = VTIGER_SCHEMA;
+    let systemInstruction = DEFAULT_GENERATE_INSTRUCTION;
     
     try {
       const settings = await db.select().from(aiSettings).where(eq(aiSettings.id, 'global')).limit(1);
       const config = settings[0];
       if (config) {
         modelName = config.generateModel;
-        systemInstruction = config.generateSystemInstruction || VTIGER_SCHEMA;
+        systemInstruction = config.generateSystemInstruction || DEFAULT_GENERATE_INSTRUCTION;
         maxLimit = config.maxResultsLimit || DEFAULT_MAX_RESULTS_LIMIT;
       }
     } catch (sErr) {
@@ -90,12 +90,33 @@ export default defineEventHandler(async (event) => {
       }
     }
 
-    // Step 2: Get Preview Data (Limit 10)
-    const previewSql = jsonResult.sql.replace(/LIMIT\s+\d+/i, '').replace(/;$/, '') + ' LIMIT 10';
+    // --- Hard Limit Enforcement ---
+    let finalSql = jsonResult.sql.trim().replace(/;$/, '');
+    const limitMatch = finalSql.match(/LIMIT\s+(\d+)/i);
+    let limitOverridden = false;
+    
+    if (limitMatch) {
+      const userLimit = parseInt(limitMatch[1]);
+      if (userLimit > maxLimit) {
+        // Override with system max limit
+        finalSql = finalSql.replace(/LIMIT\s+\d+/i, `LIMIT ${maxLimit}`);
+        limitOverridden = true;
+      }
+    } else {
+      // No limit found, append system max limit
+      finalSql += ` LIMIT ${maxLimit}`;
+    }
+    jsonResult.sql = finalSql;
+
+    // Step 2: Get Preview Data (Limit based on role)
+    const isAdminOrManager = session.role === 'admin' || session.role === 'manager';
+    const previewLimit = isAdminOrManager ? 50 : 10;
+    const previewSql = jsonResult.sql.replace(/LIMIT\s+\d+$/i, '').replace(/;$/, '') + ` LIMIT ${previewLimit}`;
     
     let previewData: any[] = [];
     let previewCount = 0;
 
+    let dbError: string | null = null;
     try {
       // Get actual count first
       const countSql = `SELECT COUNT(*) as total FROM (${jsonResult.sql.replace(/;$/, '')}) as subquery`;
@@ -104,26 +125,33 @@ export default defineEventHandler(async (event) => {
 
       // Get preview records
       const [rows]: any = await db.execute(sql.raw(previewSql));
+
       previewData = (rows as any[]).map(row => {
+        if (isAdminOrManager) return row; // Admin/Manager ดูข้อมูลดิบได้เลย ไม่ต้อง Mask
+        
         const maskedRow: any = {};
         for (const key in row) {
           maskedRow[key] = maskSensitiveData(row[key]);
         }
         return maskedRow;
       });
-    } catch (dbError: any) {
-      console.error('Preview Execution Error:', dbError);
+    } catch (err: any) {
+      console.error('Preview Execution Error:', err);
+      dbError = err.message || 'Database execution failed';
     }
 
     return {
       success: true,
-      status: 'success',
+      status: dbError ? 'error' : 'success',
       sql: jsonResult.sql,
       explanation: jsonResult.explanation,
       previewCount: previewCount,
       maxResultsLimit: maxLimit,
-      previewData: previewData
+      previewData: previewData,
+      dbError: dbError,
+      limitOverridden: limitOverridden
     };
+
 
   } catch (error: any) {
     console.error('AI Generation Error:', error);

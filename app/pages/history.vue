@@ -33,14 +33,75 @@ import {
   Code,
   Copy,
   RefreshCw,
-  ArrowRight
+  ArrowRight,
+  Search,
+  Filter,
+  Trash2,
+  Database,
+  LayoutGrid,
+  Pencil,
+  Link
 } from 'lucide-vue-next'
 
 const requests  = ref<any[]>([])
 const isLoading = ref(true)
+
+// ─── Edit Zoho Link ─────────────────────────────────────────
+const editZohoModal = ref(false)
+const editZohoRequestId = ref('')
+const editZohoLink = ref('')
+const isSavingZohoLink = ref(false)
+
+const editZohoShareLink = ref('')
+const editZohoSharePassword = ref('')
+
+const copyZohoShareInfo = (req: any) => {
+  const lines = [`🔗 Link: ${req.zohoShareLink}`]
+  if (req.zohoSharePassword) lines.push(`🔑 Password: ${req.zohoSharePassword}`)
+  navigator.clipboard.writeText(lines.join('\n'))
+  toast.success('คัดลอกแล้ว', 'คัดลอก Share Link และรหัสผ่านเรียบร้อย')
+}
+
+const openEditZoho = (req: any) => {
+  editZohoRequestId.value = req.id
+  editZohoLink.value = req.zohoLink || ''
+  editZohoShareLink.value = req.zohoShareLink || ''
+  editZohoSharePassword.value = req.zohoSharePassword || ''
+  editZohoModal.value = true
+}
+
+const saveZohoLink = async () => {
+  isSavingZohoLink.value = true
+  try {
+    await $fetch('/api/ai-query/update-zoho-link', {
+      method: 'POST',
+      body: {
+        requestId: editZohoRequestId.value,
+        zohoLink: editZohoLink.value,
+        zohoShareLink: editZohoShareLink.value,
+        zohoSharePassword: editZohoSharePassword.value
+      }
+    })
+    const req = requests.value.find(r => r.id === editZohoRequestId.value)
+    if (req) {
+      req.zohoLink = editZohoLink.value || null
+      req.zohoShareLink = editZohoShareLink.value || null
+      req.zohoSharePassword = editZohoSharePassword.value || null
+    }
+    editZohoModal.value = false
+    toast.success('บันทึกแล้ว', 'อัพเดต Zoho Link เรียบร้อย')
+  } catch (e: any) {
+    toast.error('ล้มเหลว', e.message || 'ไม่สามารถบันทึกได้')
+  } finally {
+    isSavingZohoLink.value = false
+  }
+}
 const isLoadingMore = ref(false)
 const systemStatus  = useState<any>('system-status')
 const toast = useToast()
+const searchQuery = ref('')
+const isSearching = ref(false)
+let searchTimeout: any = null
 
 const copyToClipboard = (text: string) => {
   navigator.clipboard.writeText(text)
@@ -155,7 +216,34 @@ const renderMarkdown = (text: string) => {
     .replace(/^\s*\*\s+(.*)$/gim, '<li class="ml-5 list-disc py-0.5">$1</li>')
     .replace(/^\s*-\s+(.*)$/gim, '<li class="ml-5 list-disc py-0.5">$1</li>')
     .replace(/`(.*?)`/gim, '<code class="px-1.5 py-0.5 bg-indigo-50 dark:bg-indigo-900/40 border border-indigo-100 dark:border-indigo-800/50 rounded-md text-indigo-600 dark:text-indigo-300 text-[11px] font-mono">$1</code>')
-    .replace(/\n/gim, '<br/>')
+  
+  // Table Support
+  html = html.replace(/((?:\|[^\n]+\|(?:\n|$)){2,})/gim, (match) => {
+    const rows = match.trim().split('\n').filter(r => r.trim() !== '')
+    if (rows.length < 2) return match // Not a valid table
+
+    const tableRows = rows.map((row, index) => {
+      // Split by | and remove empty strings from ends
+      const cells = row.split('|').filter((_, i, arr) => i > 0 && i < arr.length - 1)
+      
+      // Check if this is a separator row (|---|---|)
+      if (index === 1 && cells.every(c => c.trim().match(/^:?-+:?$/))) return ''
+      
+      const tag = index === 0 ? 'th' : 'td'
+      const cellStyle = tag === 'th' 
+        ? 'px-4 py-3 bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white font-black uppercase tracking-wider text-[10px] border border-slate-200 dark:border-slate-700 text-left'
+        : 'px-4 py-2.5 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300'
+      
+      const renderedCells = cells.map(c => `<${tag} class="${cellStyle}">${c.trim()}</${tag}>`).join('')
+      const rowStyle = index === 0 ? '' : (index % 2 === 0 ? 'bg-white dark:bg-slate-950' : 'bg-slate-50/50 dark:bg-slate-900/30')
+      
+      return `<tr class="${rowStyle}">${renderedCells}</tr>`
+    }).filter(r => r !== '').join('')
+
+    return `<div class="overflow-x-auto my-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm"><table class="w-full text-[11px] border-collapse min-w-full">${tableRows}</table></div>`
+  })
+
+  html = html.replace(/\n/gim, '<br/>')
 
   html = html.replace(/(<li.*?>.*?<\/li><br\/>)+/gim, '<ul class="my-3 space-y-1">$&</ul>')
   html = html.replace(/<\/li><br\/>/gim, '</li>')
@@ -166,6 +254,16 @@ const renderMarkdown = (text: string) => {
   mermaidBlocks.forEach((block, index) => {
     // Escape quote marks from mermaid string block back to proper quotes if they were html escaped
     let cleanBlock = block.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    
+    // --- Mermaid Syntax Auto-Fixer (Fix for 11.x strictness) ---
+    // 1. Fix Pie Chart titles missing quotes
+    if (cleanBlock.trim().toLowerCase().startsWith('pie')) {
+      cleanBlock = cleanBlock.replace(/title\s+([^"\n]+)(\n|$)/gi, 'title "$1"$2')
+    }
+    // 2. Wrap node labels with special characters in quotes (common AI mistake)
+    // Fix nodes like: A[Label (Text)] to A["Label (Text)"]
+    cleanBlock = cleanBlock.replace(/(\[|\{|\()([^"\]\}\)]*?[\(\)\s][^"\]\}\)]*?)(\]|\}|\))/g, '$1"$2"$3')
+    
     html = html.replace(`__MERMAID_BLOCK_${index}__`, `<div class="mermaid flex justify-center w-full my-6 bg-slate-50 dark:bg-slate-800/50 p-4 rounded-xl border border-slate-200 dark:border-slate-700/50 overflow-x-auto">${cleanBlock}</div>`)
   })
 
@@ -209,11 +307,16 @@ const toggleComment = (id: string) => {
 }
 
 const fetchHistory = async (page = 1) => {
-  if (page === 1) isLoading.value = true
-  else isLoadingMore.value = true
+  if (page === 1) {
+    if (requests.value.length === 0) isLoading.value = true
+    else isSearching.value = true
+  } else {
+    isLoadingMore.value = true
+  }
 
   try {
-    const response = await $fetch<any>(`/api/ai-query/history?page=${page}&limit=10`)
+    const q = searchQuery.value.trim()
+    const response = await $fetch<any>(`/api/ai-query/history?page=${page}&limit=10&search=${encodeURIComponent(q)}`)
     if (response.success) {
       if (page === 1) {
         // โหลดหน้าแรก: replace ข้อมูล
@@ -229,9 +332,18 @@ const fetchHistory = async (page = 1) => {
     toast.error('โหลดข้อมูลไม่สำเร็จ', 'ไม่สามารถดึงประวัติการขอข้อมูลได้')
   } finally {
     isLoading.value     = false
+    isSearching.value   = false
     isLoadingMore.value = false
   }
 }
+
+// Watch search with debounce
+watch(searchQuery, () => {
+  clearTimeout(searchTimeout)
+  searchTimeout = setTimeout(() => {
+    fetchHistory(1)
+  }, 500)
+})
 
 const loadMore = () => {
   fetchHistory(pagination.value.page + 1)
@@ -316,6 +428,7 @@ const analyzeData = async (id: string) => {
 interface ChatMsg { role: 'user' | 'ai'; content: string }
 const chatState = ref<Record<string, { open: boolean; messages: ChatMsg[]; input: string; loading: boolean; abortController?: AbortController | null }>>({})
 const chatScrollRefs = ref<Record<string, HTMLElement | null>>({})
+const chatInput = ref<HTMLTextAreaElement | null>(null)
 const showScrollButton = ref(false)
 
 const handleChatScroll = (e: Event) => {
@@ -397,6 +510,14 @@ const sendChat = async (id: string) => {
   }
 }
 
+const handleQuickReply = (id: string, question: string) => {
+  if (!chatState.value[id]) {
+    chatState.value[id] = { open: true, messages: [], input: '', loading: false, abortController: null }
+  }
+  chatState.value[id].input = question
+  sendChat(id)
+}
+
 // ─── Text-to-Speech (TTS) ──────────────────────────────────
 const currentlyReadingId = ref<string | null>(null)
 const synth = typeof window !== 'undefined' ? window.speechSynthesis : null
@@ -447,13 +568,26 @@ const stopSpeak = () => {
 const activeModalRequestId = ref<string | null>(null)
 const activeModalTab = ref<'analyze' | 'chat'>('analyze')
 const isModalFullscreen = ref(false)
+const isReferenceExpanded = ref(true)
 const activeRequestData = computed(() => requests.value.find(r => r.id === activeModalRequestId.value))
 
 const openModal = (id: string, tab: 'analyze' | 'chat') => {
+  // ถ้าเป็นการเปิดใหม่จากที่เคยปิดอยู่ ให้เริ่มที่แบบไม่เต็มจอ
+  // แต่ถ้าเปิดค้างไว้อยู่แล้ว (เช่น สลับ Tab) ให้คงสถานะเดิมไว้
+  if (!activeModalRequestId.value) {
+    isModalFullscreen.value = false
+  }
+  
   activeModalRequestId.value = id
   activeModalTab.value = tab
-  if (tab === 'chat' && !chatState.value[id]) {
-    chatState.value[id] = { open: true, messages: [], input: '', loading: false, abortController: null }
+  if (tab === 'chat') {
+    if (!chatState.value[id]) {
+      chatState.value[id] = { open: true, messages: [], input: '', loading: false, abortController: null }
+    }
+    // Auto focus when opening chat
+    nextTick(() => {
+      chatInput.value?.focus()
+    })
   }
 }
 
@@ -529,10 +663,31 @@ onUnmounted(() => {
         <h2 class="text-4xl font-extrabold tracking-tight text-slate-900 dark:text-white">ประวัติการขอข้อมูล</h2>
         <p class="text-slate-500 dark:text-slate-400 text-lg">ตรวจสอบสถานะคำขอและดาวน์โหลดไฟล์ CSV เมื่อได้รับอนุมัติ</p>
       </div>
-      <!-- Total count badge -->
-      <div v-if="!isLoading && pagination.total > 0" class="px-5 py-2.5 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:blue-300 rounded-2xl text-sm font-black border border-blue-100 dark:border-blue-800 flex items-center gap-2 shrink-0">
-        <History class="w-4 h-4" />
-        ทั้งหมด {{ pagination.total }} รายการ
+      <div class="flex flex-col md:flex-row items-stretch md:items-center gap-4">
+        <!-- Search Bar -->
+        <div class="relative group">
+          <Search class="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 group-focus-within:text-blue-500 transition-colors" />
+          <input
+            v-model="searchQuery"
+            @keyup.enter="fetchHistory(1)"
+            type="text"
+            placeholder="ค้นหาตามคำถาม หรือ ID..."
+            class="pl-11 pr-10 py-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all w-full md:w-80 shadow-sm outline-none"
+          />
+          <button 
+            v-if="searchQuery" 
+            @click="searchQuery = ''; fetchHistory(1)"
+            class="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg transition-colors text-slate-500"
+          >
+            <X class="w-3.5 h-3.5" />
+          </button>
+        </div>
+
+        <!-- Total count badge -->
+        <div v-if="!isLoading" class="px-5 py-3 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:blue-300 rounded-2xl text-sm font-black border border-blue-100 dark:border-blue-800 flex items-center gap-2 shrink-0 shadow-sm shadow-blue-500/5">
+          <History class="w-4 h-4" />
+          {{ pagination.total }} รายการที่พบ
+        </div>
       </div>
     </header>
 
@@ -557,414 +712,448 @@ onUnmounted(() => {
         ลองใหม่อีกครั้ง
       </button>
     </div>
-
     <!-- Empty State -->
-    <div v-else-if="requests.length === 0" class="bg-white dark:bg-slate-900 rounded-[2.5rem] border border-slate-200 dark:border-slate-800 p-16 text-center shadow-xl shadow-slate-200/50 dark:shadow-none">
+    <div v-else-if="requests.length === 0 && !isSearching" class="bg-white dark:bg-slate-900 rounded-[2.5rem] border border-slate-200 dark:border-slate-800 p-16 text-center shadow-xl shadow-slate-200/50 dark:shadow-none animate-in fade-in zoom-in-95 duration-500">
       <div class="inline-flex items-center justify-center w-24 h-24 rounded-[2rem] bg-slate-50 dark:bg-slate-950 mb-6 text-slate-300 dark:text-slate-700 border border-slate-100 dark:border-slate-800">
         <Clock class="w-12 h-12" />
       </div>
-      <h3 class="text-2xl font-bold text-slate-900 dark:text-white">ยังไม่มีประวัติการขอข้อมูล</h3>
-      <p class="text-slate-500 dark:text-slate-400 mt-2 text-lg">เริ่มขอข้อมูลใหม่ได้ที่หน้าแรกของระบบ</p>
+      <h3 class="text-2xl font-bold text-slate-900 dark:text-white">ไม่พบประวัติการขอข้อมูล</h3>
+      <p class="text-slate-500 dark:text-slate-400 mt-2 text-lg">ลองเปลี่ยนคำค้นหา หรือเริ่มต้นขอข้อมูลใหม่ได้ที่หน้าแรกครับ</p>
       <NuxtLink to="/" class="mt-8 inline-flex items-center gap-2 px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-2xl transition-all shadow-lg shadow-blue-500/20 active:scale-95 group">
         ไปที่หน้าขอข้อมูล
         <ArrowRight class="w-5 h-5 group-hover:translate-x-1 transition-transform" />
       </NuxtLink>
     </div>
 
-    <!-- Request List -->
-    <div v-else class="grid gap-6">
-      <div
-        v-for="req in requests"
-        :key="req.id"
-        class="bg-white dark:bg-slate-900 rounded-[2rem] shadow-xl shadow-slate-200/50 dark:shadow-none border border-slate-200 dark:border-slate-800 overflow-hidden hover:border-blue-500/50 dark:hover:border-blue-400/50 transition-all"
-      >
-        <div class="p-8 md:p-10">
-
-          <!-- Top Row -->
-          <div class="flex flex-col md:flex-row md:items-start justify-between gap-6 mb-6">
-            <div class="space-y-4 flex-1">
-              <div class="flex flex-wrap items-center gap-3">
-                <div class="px-3 py-1 bg-slate-100 dark:bg-slate-950 rounded-lg border border-slate-200 dark:border-slate-800 text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">
-                  ID: {{ req.id.split('-')[0].toUpperCase() }}
-                </div>
-                <div class="flex items-center gap-2 px-3 py-1 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 rounded-lg text-[10px] font-black uppercase tracking-widest border border-blue-100 dark:border-blue-800/50">
-                  <User class="w-3 h-3" />
-                  {{ req.user }}
-                </div>
-                <div class="px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest border flex items-center gap-1.5" :class="getStatusClass(req.status)">
-                  <CheckCircle v-if="req.status === 'APPROVED'" class="w-3 h-3" />
-                  <XCircle v-else-if="req.status === 'REJECTED'" class="w-3 h-3" />
-                  <Clock v-else class="w-3 h-3" />
-                  {{ getStatusLabel(req.status) }}
-                </div>
+    <!-- Request List Content -->
+    <div v-else class="relative min-h-[300px]">
+      <!-- Searching Overlay -->
+      <transition name="fade">
+        <div v-if="isSearching" class="absolute inset-0 z-20 flex items-center justify-center bg-white/20 dark:bg-slate-900/20 backdrop-blur-[2px] rounded-[2.5rem]">
+           <div class="flex flex-col items-center gap-4 bg-white dark:bg-slate-900 p-8 rounded-[2rem] shadow-2xl border border-slate-100 dark:border-slate-800 animate-in zoom-in-95 duration-200">
+              <div class="relative">
+                <div class="w-12 h-12 rounded-full border-4 border-slate-100 dark:border-slate-800"></div>
+                <div class="w-12 h-12 rounded-full border-4 border-blue-600 border-t-transparent animate-spin absolute top-0 left-0"></div>
               </div>
+              <div class="flex flex-col items-center gap-1">
+                <span class="text-sm font-black text-slate-900 dark:text-white uppercase tracking-widest">Searching</span>
+                <span class="text-[10px] font-bold text-slate-400 dark:text-slate-500">กำลังอัปเดตรายการ...</span>
+              </div>
+           </div>
+        </div>
+      </transition>
 
-              <p class="text-xl font-medium text-slate-700 dark:text-slate-300 leading-relaxed">"{{ req.query }}"</p>
-
-              <div class="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
-                <Calendar class="w-3.5 h-3.5" />
+      <!-- Grid List -->
+      <div :class="['grid gap-4 md:gap-6 transition-all duration-700 ease-in-out', isSearching ? 'opacity-30 blur-[4px] grayscale-[0.8] scale-[0.98]' : 'opacity-100 blur-0 grayscale-0 scale-100']">
+        <div
+          v-for="req in requests"
+          :key="req.id"
+          class="bg-white dark:bg-slate-900 rounded-[2rem] shadow-xl shadow-slate-200/50 dark:shadow-none border border-slate-200 dark:border-slate-800 overflow-hidden hover:border-blue-500/40 dark:hover:border-blue-400/40 transition-all group/card"
+        >
+        <div class="p-6 md:p-8">
+          <!-- 1. Top Meta Bar (Ultra Compact) -->
+          <div class="flex items-center justify-between gap-4 mb-5 pb-4 border-b border-slate-100 dark:border-slate-800/50">
+            <div class="flex items-center gap-2 overflow-hidden">
+              <div class="px-2 py-0.5 bg-slate-50 dark:bg-slate-950 rounded border border-slate-200 dark:border-slate-800 text-[9px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest shrink-0">
+                #{{ req.id.split('-')[0].toUpperCase() }}
+              </div>
+              <div class="flex items-center gap-1.5 px-2 py-0.5 bg-blue-50/50 dark:bg-blue-900/10 text-blue-600 dark:text-blue-400 rounded text-[9px] font-black uppercase tracking-widest border border-blue-100 dark:border-blue-800/50 shrink-0">
+                <User class="w-3 h-3" />
+                {{ req.user }}
+              </div>
+              <div class="hidden sm:flex items-center gap-1.5 text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest whitespace-nowrap">
+                <Calendar class="w-3 h-3" />
                 {{ req.time }}
               </div>
             </div>
+            <div class="px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-widest border flex items-center gap-1.5" :class="getStatusClass(req.status)">
+              <CheckCircle v-if="req.status === 'APPROVED'" class="w-3 h-3" />
+              <XCircle v-else-if="req.status === 'REJECTED'" class="w-3 h-3" />
+              <Clock v-else class="w-3 h-3" />
+              {{ getStatusLabel(req.status) }}
+            </div>
+          </div>
 
-            <!-- Download + Expiry column -->
-            <div v-if="req.status === 'APPROVED'" class="flex flex-col items-stretch md:items-end gap-2 shrink-0">
-              <div v-if="req.isExpired" class="flex flex-col gap-2">
-                <div class="flex items-center justify-center gap-2 px-6 py-3 bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 text-sm font-black rounded-xl border border-slate-200 dark:border-slate-700">
-                  <TimerOff class="w-4 h-4" />
-                  ลิงก์หมดอายุแล้ว
-                </div>
+          <!-- 2. Main Content Row -->
+          <div class="flex flex-col lg:flex-row gap-6 items-start">
+            <!-- Left: Query & Meta Details -->
+            <div class="flex-1 min-w-0 space-y-5">
+              <h4 class="text-lg font-medium text-slate-700 dark:text-slate-300 leading-tight">"{{ req.query }}"</h4>
+              
+              <!-- Reason/Comment Buttons (Inline & Compact) -->
+              <div class="flex flex-wrap gap-2">
                 <button
-                  @click="openRenewModal(req.id)"
-                  class="flex items-center justify-center gap-2 px-6 py-3 bg-blue-50 hover:bg-blue-600 text-blue-600 hover:text-white text-sm font-black rounded-xl transition-all border border-blue-200 hover:border-blue-600 dark:bg-blue-900/20 dark:text-blue-400 dark:border-blue-800 active:scale-95 group"
+                  v-if="req.requestReason"
+                  @click="toggleReason(req.id)"
+                  class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-[11px] font-bold transition-all active:scale-95"
+                  :class="openReasonIds.has(req.id)
+                    ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                    : 'bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 border-blue-100 dark:border-blue-800 hover:bg-blue-50'"
                 >
-                  <RefreshCw class="w-4 h-4 group-hover:rotate-180 transition-transform duration-500" />
-                  ขอต่ออายุลิงก์
+                  <MessageSquare class="w-3.5 h-3.5" />
+                  เหตุผลในการขอ
+                  <ChevronUp v-if="openReasonIds.has(req.id)" class="w-3.5 h-3.5" />
+                  <ChevronDown v-else class="w-3.5 h-3.5" />
+                </button>
+
+                <button
+                  v-if="req.managerComment"
+                  @click="toggleComment(req.id)"
+                  class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-[11px] font-bold transition-all active:scale-95"
+                  :class="openCommentIds.has(req.id)
+                    ? req.status === 'REJECTED' ? 'bg-rose-600 text-white border-rose-600' : 'bg-emerald-600 text-white border-emerald-600'
+                    : req.status === 'REJECTED' ? 'bg-white dark:bg-slate-800 text-rose-600 border-rose-200' : 'bg-white dark:bg-slate-800 text-emerald-600 border-emerald-200 hover:bg-emerald-50/50'"
+                >
+                  <MessageSquare class="w-3.5 h-3.5" />
+                  Manager Comment
+                  <ChevronUp v-if="openCommentIds.has(req.id)" class="w-3.5 h-3.5" />
+                  <ChevronDown v-else class="w-3.5 h-3.5" />
                 </button>
               </div>
-              <button
-                v-else
-                @click="downloadCsv(req.id)"
-                class="flex items-center justify-center gap-3 px-8 py-4 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-black rounded-2xl transition-all shadow-xl shadow-emerald-500/20 active:scale-95 group"
-              >
-                <Download class="w-5 h-5" />
-                <div class="flex flex-col items-center">
-                  <span class="tracking-widest uppercase">ดาวน์โหลด CSV</span>
-                  <span class="text-[10px] font-medium opacity-80 normal-case tracking-normal">(ทั้งหมด {{ (req.resultCount || 0).toLocaleString() }} รายการ)</span>
+
+              <!-- Collapsible Content -->
+              <transition name="expand">
+                <div v-if="openReasonIds.has(req.id)" class="p-4 bg-blue-50/40 dark:bg-blue-900/5 border border-blue-100 dark:border-blue-800/30 rounded-xl">
+                  <p class="text-[9px] font-black text-blue-600 dark:text-blue-400 uppercase tracking-widest mb-1.5">วัตถุประสงค์ในการดึงข้อมูล</p>
+                  <p class="text-slate-600 dark:text-slate-400 text-xs font-medium leading-relaxed">{{ req.requestReason }}</p>
                 </div>
-              </button>
-              <div class="text-center text-[10px] font-black uppercase tracking-widest">
-                <span v-if="req.expiresAt === null" class="flex items-center justify-end gap-1 text-blue-500 dark:text-blue-400">
-                  <Infinity class="w-3 h-3" /> ไม่มีวันหมดอายุ
-                </span>
-                <span v-else class="text-slate-400 dark:text-slate-500 flex flex-wrap items-center gap-2">
-                  หมดอายุ {{ new Date(req.expiresAt).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' }) }}
-                  <span class="flex items-center gap-1.5 px-2 py-0.5 bg-slate-100 dark:bg-slate-800 rounded-md text-[10px] font-bold" :class="req.downloadCount > 0 ? 'text-blue-600 dark:text-blue-400' : 'text-slate-400 dark:text-slate-500'">
-                    <HardDrive class="w-3 h-3" />
-                    โหลดแล้ว {{ req.downloadCount || 0 }} ครั้ง
-                  </span>
-                </span>
+              </transition>
+
+              <transition name="expand">
+                <div v-if="openCommentIds.has(req.id)" class="p-4 border rounded-xl" :class="req.status === 'REJECTED' ? 'bg-rose-50/40 border-rose-100' : 'bg-emerald-50/40 border-emerald-100'">
+                  <p class="text-[9px] font-black uppercase tracking-widest mb-1.5" :class="req.status === 'REJECTED' ? 'text-rose-600' : 'text-emerald-600'">Comment จาก Manager</p>
+                  <p class="text-slate-600 dark:text-slate-400 text-xs font-medium leading-relaxed">{{ req.managerComment }}</p>
+                </div>
+              </transition>
+
+              <div v-if="req.status === 'REJECTED' && req.reason" class="p-4 bg-rose-50/50 dark:bg-rose-900/10 border border-rose-100 dark:border-rose-900/30 rounded-xl flex gap-3">
+                <AlertCircle class="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                <div>
+                  <p class="text-[9px] font-black text-rose-700 dark:text-rose-400 uppercase tracking-widest mb-1">เหตุผลที่ไม่อนุมัติ</p>
+                  <p class="text-rose-600 dark:text-rose-300 text-xs font-medium">{{ req.reason }}</p>
+                </div>
               </div>
             </div>
-          </div>
 
-          <!-- ปุ่มรายละเอียดเพิ่มเติม (Reason & Comment) -->
-          <div class="flex flex-wrap gap-3 mb-4">
-            <!-- ปุ่มดูเหตุผลในการขอข้อมูล -->
-            <button
-              v-if="req.requestReason"
-              @click="toggleReason(req.id)"
-              class="flex items-center gap-2 px-4 py-2.5 rounded-xl border text-sm font-black transition-all active:scale-95"
-              :class="openReasonIds.has(req.id)
-                ? 'bg-blue-600 text-white border-blue-600 shadow-lg shadow-blue-500/20'
-                : 'bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400 border-blue-100 dark:border-blue-800 hover:bg-blue-100 dark:hover:bg-blue-900/40'"
-            >
-              <MessageSquare class="w-4 h-4" />
-              เหตุผลในการขอข้อมูล
-              <ChevronUp v-if="openReasonIds.has(req.id)" class="w-4 h-4" />
-              <ChevronDown v-else class="w-4 h-4" />
-            </button>
-
-            <!-- Manager Comment Button -->
-            <button
-              v-if="req.managerComment"
-              @click="toggleComment(req.id)"
-              class="flex items-center gap-2 px-4 py-2.5 rounded-xl border text-sm font-black transition-all active:scale-95"
-              :class="openCommentIds.has(req.id)
-                ? req.status === 'REJECTED'
-                  ? 'bg-rose-600 text-white border-rose-600 shadow-lg shadow-rose-500/20'
-                  : 'bg-emerald-600 text-white border-emerald-600 shadow-lg shadow-emerald-500/20'
-                : req.status === 'REJECTED'
-                  ? 'bg-rose-50 dark:bg-rose-900/20 text-rose-700 dark:text-rose-400 border-rose-100 dark:border-rose-800 hover:bg-rose-100 dark:hover:bg-rose-900/40'
-                  : 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400 border-emerald-100 dark:border-emerald-800 hover:bg-emerald-100 dark:hover:bg-emerald-900/40'"
-            >
-              <MessageSquare class="w-4 h-4" />
-              Comment จาก Manager
-              <ChevronUp v-if="openCommentIds.has(req.id)" class="w-4 h-4" />
-              <ChevronDown v-else class="w-4 h-4" />
-            </button>
-          </div>
-
-          <!-- Content: Reason -->
-          <transition name="expand">
-            <div v-if="openReasonIds.has(req.id)" class="mb-4 p-5 bg-blue-50/60 dark:bg-blue-900/10 border border-blue-100 dark:border-blue-800/50 rounded-2xl">
-              <p class="text-[10px] font-black text-blue-600 dark:text-blue-400 uppercase tracking-[0.2em] mb-2">เหตุผล / วัตถุประสงค์</p>
-              <p class="text-slate-700 dark:text-slate-300 leading-relaxed font-medium">{{ req.requestReason }}</p>
-            </div>
-          </transition>
-
-          <!-- Content: Rejected Reason (Alert style) -->
-          <div v-if="req.status === 'REJECTED' && req.reason" class="mb-4 bg-rose-50 dark:bg-rose-900/10 rounded-2xl p-6 border border-rose-100 dark:border-rose-900/50 flex gap-4">
-            <AlertCircle class="w-6 h-6 text-rose-600 dark:text-rose-400 shrink-0" />
-            <div>
-              <p class="text-[10px] font-black text-rose-700 dark:text-rose-400 uppercase tracking-[0.2em] mb-1">เหตุผลที่ไม่อนุมัติ</p>
-              <p class="text-rose-600 dark:text-rose-300 leading-relaxed font-medium">{{ req.reason }}</p>
-            </div>
-          </div>
-
-          <!-- Content: Manager Comment -->
-          <transition name="expand">
-            <div
-              v-if="openCommentIds.has(req.id)"
-              class="mb-4 p-5 rounded-2xl border"
-              :class="req.status === 'REJECTED'
-                ? 'bg-rose-50/60 dark:bg-rose-900/10 border-rose-100 dark:border-rose-800/50'
-                : 'bg-emerald-50/60 dark:bg-emerald-900/10 border-emerald-100 dark:border-emerald-800/50'"
-            >
-              <p
-                class="text-[10px] font-black uppercase tracking-[0.2em] mb-2"
-                :class="req.status === 'REJECTED' ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'"
-              >Comment จาก Manager</p>
-              <p class="text-slate-700 dark:text-slate-300 leading-relaxed font-medium">{{ req.managerComment }}</p>
-            </div>
-          </transition>
-
-          <!-- AI Explanation -->
-          <div class="bg-slate-50 dark:bg-slate-950/50 rounded-2xl p-6 border border-slate-100 dark:border-slate-800/50 flex gap-4 relative">
-            <FileSpreadsheet class="w-6 h-6 text-blue-500 shrink-0" />
-            <div class="flex-1">
-              <div class="flex items-center justify-between mb-1">
-                <p class="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em]">คำอธิบายจาก AI</p>
-                
-                <!-- ปุ่มดู SQL สำหรับ Admin/Manager -->
-                <button
-                  v-if="user?.role === 'admin' || user?.role === 'manager' || authData?.user?.role === 'admin' || authData?.user?.role === 'manager'"
-                  @click="openSqlModal(req.sql, req.explanation)"
-                  class="flex items-center gap-1.5 px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-black uppercase tracking-widest rounded-lg transition-all active:scale-95 shadow-md z-10"
-                >
-                  <Code class="w-3 h-3" />
-                  ดูคำสั่ง SQL
+            <!-- Right: Action Bar (Compact) -->
+            <div v-if="req.status === 'APPROVED'" class="w-full lg:w-60 shrink-0 space-y-3">
+              <div v-if="req.isExpired" class="space-y-2">
+                <div class="px-4 py-2 bg-slate-50 dark:bg-slate-800/30 text-slate-400 text-[11px] font-bold rounded-xl border border-dashed border-slate-200 dark:border-slate-700 flex items-center justify-center gap-2">
+                  <TimerOff class="w-3.5 h-3.5" /> ลิงก์หมดอายุแล้ว
+                </div>
+                <button @click="openRenewModal(req.id)" class="w-full px-4 py-2 bg-blue-50 hover:bg-blue-600 text-blue-600 hover:text-white text-[11px] font-black uppercase tracking-widest rounded-xl border border-blue-200 transition-all flex items-center justify-center gap-2 shadow-sm">
+                  <RefreshCw class="w-3.5 h-3.5" /> ขอต่ออายุ
                 </button>
               </div>
-              <p class="text-slate-600 dark:text-slate-400 leading-relaxed text-sm font-medium">{{ req.explanation }}</p>
+              <!-- Zoho section (for Zoho exports) -->
+              <div v-else-if="req.zohoLink || req.zohoShareLink || req.requestReason === 'Export to Zoho WorkDrive'" class="space-y-2">
+                <!-- Admin: ลิ้งค์จริงของไฟล์ -->
+                <div v-if="user?.role === 'admin'" class="bg-blue-50/50 dark:bg-blue-900/5 border border-blue-100 dark:border-blue-800/50 rounded-2xl p-3 flex items-center gap-2">
+                  <a v-if="req.zohoLink" :href="req.zohoLink" target="_blank" rel="noopener" class="w-9 h-9 rounded-xl bg-blue-600 hover:bg-blue-700 text-white flex items-center justify-center shadow-lg shadow-blue-600/20 transition-all active:scale-90 shrink-0">
+                    <LayoutGrid class="w-4 h-4" />
+                  </a>
+                  <div v-else class="w-9 h-9 rounded-xl bg-slate-200 dark:bg-slate-700 flex items-center justify-center shrink-0">
+                    <LayoutGrid class="w-4 h-4 text-slate-400" />
+                  </div>
+                  <div class="min-w-0 flex-1">
+                    <p class="text-[9px] font-black text-blue-600 dark:text-blue-400 uppercase tracking-widest">ไฟล์ใน WorkDrive</p>
+                    <p class="text-[10px] text-slate-400 truncate">{{ req.zohoLink ? 'เปิดไฟล์ต้นฉบับ' : 'ยังไม่มีลิ้งค์' }}</p>
+                  </div>
+                  <button @click="openEditZoho(req)" class="w-7 h-7 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900/30 text-blue-400 hover:text-blue-600 flex items-center justify-center transition-all shrink-0" title="แก้ไข">
+                    <Pencil class="w-3 h-3" />
+                  </button>
+                </div>
+
+                <!-- ทุก role: Share Link + Password -->
+                <div v-if="req.zohoShareLink" class="bg-emerald-50/50 dark:bg-emerald-900/5 border border-emerald-100 dark:border-emerald-800/50 rounded-2xl p-3 space-y-2">
+                  <div class="flex items-center gap-2">
+                    <a :href="req.zohoShareLink" target="_blank" rel="noopener" class="w-9 h-9 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white flex items-center justify-center shadow-lg shadow-emerald-600/20 transition-all active:scale-90 shrink-0">
+                      <Link class="w-4 h-4" />
+                    </a>
+                    <div class="min-w-0 flex-1">
+                      <p class="text-[9px] font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-widest">Share Link</p>
+                      <p class="text-[10px] text-slate-400 truncate">{{ (req.resultCount || 0).toLocaleString() }} รายการ</p>
+                    </div>
+                    <button
+                      @click="copyZohoShareInfo(req)"
+                      class="w-8 h-8 rounded-lg bg-emerald-100 dark:bg-emerald-900/30 hover:bg-emerald-200 dark:hover:bg-emerald-800/40 text-emerald-600 dark:text-emerald-400 flex items-center justify-center transition-all shrink-0"
+                      :title="req.zohoSharePassword ? 'คัดลอก Link + Password' : 'คัดลอก Link'"
+                    >
+                      <Copy class="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  <div v-if="req.zohoSharePassword" class="flex items-center gap-2 bg-white/60 dark:bg-white/5 rounded-lg px-3 py-1.5">
+                    <span class="text-[9px] font-black text-slate-400 uppercase tracking-widest shrink-0">Password</span>
+                    <span class="text-xs font-mono text-slate-700 dark:text-white/70 select-all flex-1">{{ req.zohoSharePassword }}</span>
+                  </div>
+                </div>
+                <div v-else-if="user?.role === 'admin'" class="bg-slate-50 dark:bg-slate-800/30 border border-dashed border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-[10px] text-slate-400 text-center">
+                  ยังไม่มี Share Link — กดแก้ไขเพื่อเพิ่ม
+                </div>
+              </div>
+              <!-- CSV download -->
+              <div v-else class="bg-emerald-50/50 dark:bg-emerald-900/5 border border-emerald-100 dark:border-emerald-800/50 rounded-2xl p-3 flex items-center gap-3">
+                <button @click="downloadCsv(req.id)" class="w-11 h-11 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white flex items-center justify-center shadow-lg shadow-emerald-600/20 transition-all active:scale-90 shrink-0">
+                  <Download class="w-5 h-5" />
+                </button>
+                <div class="min-w-0 pr-1">
+                  <p class="text-[9px] font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-widest">Download CSV</p>
+                  <p class="text-xs font-bold text-slate-600 truncate">{{ (req.resultCount || 0).toLocaleString() }} รายการ</p>
+                </div>
+              </div>
+              
+              <!-- Expiry metadata -->
+              <div class="flex items-center justify-between px-1 text-[9px] font-black uppercase tracking-widest">
+                <div class="flex items-center gap-1.5 text-slate-400">
+                  <Clock class="w-3 h-3" />
+                  <span v-if="req.expiresAt === null">ตลอดชีพ</span>
+                  <span v-else>EXP: {{ new Date(req.expiresAt).toLocaleDateString('th-TH', { day: 'numeric', month: 'short' }) }}</span>
+                </div>
+                <div class="flex items-center gap-1.5 text-blue-500">
+                  <HardDrive class="w-3 h-3" />
+                  {{ req.downloadCount || 0 }} โหลด
+                </div>
+              </div>
             </div>
           </div>
 
-          <!-- ─── AI Tools (แสดงเฉพาะ APPROVED) ─── -->
-          <div v-if="req.status === 'APPROVED'" class="mt-6 space-y-4">
-            
-            <!-- Warning Limit 5000 -->
-            <div v-if="(req.resultCount || 0) > 5000" class="flex items-center gap-3 px-5 py-4 bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800/50 rounded-2xl">
-              <div class="w-8 h-8 rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
-                <AlertTriangle class="w-4 h-4" />
+          <!-- 3. AI Insights Box (Integrated) -->
+          <div class="mt-6 bg-slate-50/50 dark:bg-slate-950/30 rounded-2xl p-5 border border-slate-100 dark:border-slate-800/50 space-y-4">
+            <div class="flex gap-3">
+              <div class="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center shrink-0">
+                <FileSpreadsheet class="w-4 h-4 text-blue-500" />
               </div>
-              <div>
-                <p class="text-xs font-black text-amber-700 dark:text-amber-400 uppercase tracking-widest mb-0.5">ขีดจำกัดของ AI</p>
-                <p class="text-sm font-medium text-amber-600 dark:text-amber-300">ข้อมูลมีทั้งหมด {{ (req.resultCount || 0).toLocaleString() }} รายการ แต่ AI จะประมวลผลจากข้อมูล <span class="font-bold underline decoration-amber-300 underline-offset-4">5,000 แถวแรก</span> เท่านั้น เพื่อให้ระบบตอบกลับได้รวดเร็ว</p>
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center justify-between mb-1.5">
+                  <p class="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest">AI Insight & Explanation</p>
+                  <button
+                    v-if="user?.role === 'admin' || user?.role === 'manager' || authData?.user?.role === 'admin' || authData?.user?.role === 'manager'"
+                    @click="openSqlModal(req.sql, req.explanation)"
+                    class="flex items-center gap-1.5 px-2 py-0.5 bg-white dark:bg-slate-800 hover:bg-slate-100 text-[9px] font-black uppercase tracking-widest rounded-md border border-slate-200 dark:border-slate-700 transition-all shadow-sm"
+                  >
+                    <Code class="w-3 h-3 text-indigo-500" /> View SQL
+                  </button>
+                </div>
+                <p class="text-slate-600 dark:text-slate-400 text-xs leading-relaxed line-clamp-2 hover:line-clamp-none transition-all cursor-help">{{ req.explanation }}</p>
               </div>
             </div>
 
-            <div class="flex flex-wrap gap-3">
-              <!-- สรุปข้อมูลด้วย AI -->
-              <button
-                @click="openAnalyze(req.id)"
-                class="flex items-center gap-2 px-5 py-3 rounded-2xl text-sm font-black border transition-all active:scale-95 text-violet-700 dark:text-violet-400 border-violet-200 dark:border-violet-800 bg-violet-50 dark:bg-violet-900/20 hover:bg-violet-100 dark:hover:bg-violet-900/40"
-              >
-                <Sparkles class="w-4 h-4" />
-                สรุปข้อมูลด้วย AI
-              </button>
+            <!-- AI Action Buttons Row -->
+            <div v-if="req.status === 'APPROVED'" class="pt-3 border-t border-slate-200/50 dark:border-slate-800/50 flex items-center justify-between gap-3">
+              <div class="flex items-center gap-2">
+                <!-- Data Context Badge -->
+                <div class="flex items-center gap-1.5 px-2 py-1 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 text-[9px] font-black uppercase tracking-widest rounded-md border border-blue-100/50 dark:border-blue-800/50 shrink-0">
+                  <Database class="w-3 h-3" />
+                  จากข้อมูลชุดนี้
+                </div>
 
-              <!-- แชตกับ AI -->
-              <button
-                @click="openChat(req.id)"
-                class="flex items-center gap-2 px-5 py-3 rounded-2xl text-sm font-black border transition-all active:scale-95 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/40"
-              >
-                <Bot class="w-4 h-4" />
-                แชตกับ AI
-              </button>
+                <div v-if="(req.resultCount || 0) > 5000" class="flex items-center gap-1.5 text-amber-600 dark:text-amber-400">
+                  <AlertTriangle class="w-3.5 h-3.5" />
+                  <span class="text-[9px] font-bold uppercase tracking-tight">AI 5K LIMIT</span>
+                </div>
+              </div>
+
+              <div class="flex gap-2">
+                <button @click="openAnalyze(req.id)" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black border transition-all active:scale-95 text-violet-700 border-violet-200 bg-violet-50 hover:bg-violet-100">
+                  <Sparkles class="w-3.5 h-3.5" /> วิเคราะห์ด้วย AI
+                </button>
+                <button @click="openChat(req.id)" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black border transition-all active:scale-95 text-blue-700 border-blue-200 bg-blue-50 hover:bg-blue-100">
+                  <Bot class="w-3.5 h-3.5" /> แชตถาม AI
+                </button>
+              </div>
             </div>
-
           </div>
-          <!-- ─── End AI Tools ─── -->
-
         </div>
       </div>
+    </div>
 
-      <!-- Pagination Footer -->
-      <div class="flex flex-col items-center gap-4 py-4">
-        <p class="text-sm text-slate-400 dark:text-slate-500 font-medium">
-          แสดง <span class="font-black text-slate-700 dark:text-slate-300">{{ requests.length }}</span>
-          จาก <span class="font-black text-slate-700 dark:text-slate-300">{{ pagination.total }}</span> รายการ
-        </p>
-        <!-- Load More button -->
-        <button
-          v-if="pagination.hasMore"
-          @click="loadMore"
-          :disabled="isLoadingMore"
-          class="flex items-center gap-3 px-10 py-4 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-sm font-black rounded-2xl border border-slate-200 dark:border-slate-700 shadow-lg transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          <Loader2 v-if="isLoadingMore" class="w-5 h-5 animate-spin" />
-          <ChevronDown v-else class="w-5 h-5" />
-          {{ isLoadingMore ? 'กำลังโหลด...' : 'โหลดเพิ่มเติม' }}
-        </button>
-        <p v-else-if="requests.length > 0" class="text-xs text-slate-300 dark:text-slate-600 font-bold uppercase tracking-widest">
-          แสดงครบทุกรายการแล้ว
-        </p>
+        <!-- Pagination Footer -->
+        <div class="flex flex-col items-center gap-4 py-4">
+          <p class="text-sm text-slate-400 dark:text-slate-500 font-medium">
+            แสดง <span class="font-black text-slate-700 dark:text-slate-300">{{ requests.length }}</span>
+            จาก <span class="font-black text-slate-700 dark:text-slate-300">{{ pagination.total }}</span> รายการ
+          </p>
+          <button
+            v-if="pagination.hasMore"
+            @click="loadMore"
+            :disabled="isLoadingMore"
+            class="flex items-center gap-3 px-10 py-4 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-sm font-black rounded-2xl border border-slate-200 dark:border-slate-700 shadow-lg transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <Loader2 v-if="isLoadingMore" class="w-5 h-5 animate-spin" />
+            <ChevronDown v-else class="w-5 h-5" />
+            {{ isLoadingMore ? 'กำลังโหลด...' : 'โหลดเพิ่มเติม' }}
+          </button>
+          <p v-else-if="requests.length > 0" class="text-xs text-slate-300 dark:text-slate-600 font-bold uppercase tracking-widest">
+            แสดงครบทุกรายการแล้ว
+          </p>
+        </div>
       </div>
     </div>
-  </div>
 
-  <ClientOnly>
+    <ClientOnly>
     <Teleport to="body">
       <transition name="fade">
         <div v-if="activeModalRequestId" class="fixed inset-0 z-[100] flex items-center justify-center transition-all duration-300" :class="isModalFullscreen ? 'p-0' : 'p-4'">
           <!-- Backdrop -->
-          <div class="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" @click="closeModal"></div>
+          <div class="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"></div>
           
           <!-- Modal Content -->
           <div 
             class="relative w-full bg-white dark:bg-slate-900 shadow-2xl flex flex-col border border-slate-200 dark:border-slate-800 transition-all duration-300 overflow-hidden"
-            :class="isModalFullscreen ? 'h-full max-w-none rounded-none' : 'max-w-4xl max-h-[85vh] rounded-[2rem]'"
+            :class="isModalFullscreen ? 'h-full max-w-none rounded-none' : 'max-w-5xl h-[85vh] rounded-[2.5rem] shadow-[0_32px_64px_-12px_rgba(0,0,0,0.3)]'"
           >
             
             <!-- Header & Tabs -->
-            <div class="px-6 pt-6 bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 rounded-t-[2rem] shrink-0">
-              <div class="flex justify-between items-center mb-6">
-                <div class="flex items-center gap-3">
-                   <div class="w-10 h-10 rounded-xl flex items-center justify-center" :class="activeModalTab === 'analyze' ? 'bg-violet-500/10' : 'bg-blue-500/10'">
-                     <Sparkles class="w-5 h-5 text-violet-600 dark:text-violet-400" v-if="activeModalTab === 'analyze'" />
-                     <Bot class="w-5 h-5 text-blue-600 dark:text-blue-400" v-else />
-                   </div>
-                   <div>
-                      <div class="flex items-center gap-2 mb-0.5">
-                        <h3 class="font-black text-slate-900 dark:text-white text-lg">AI Assistant</h3>
-                        <span class="px-2 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 text-[10px] font-black rounded-full uppercase tracking-widest">Beta</span>
-                        <div class="flex items-center gap-1.5 px-2 py-0.5 bg-slate-100 dark:slate-800/80 border border-slate-200 dark:border-slate-700/50 rounded-full text-[9px] font-bold text-slate-500 dark:text-slate-400">
-                          <HardDrive class="w-3 h-3" />
-                          <span>เก็บข้อมูลในเครื่อง (Offline)</span>
-                        </div>
-                      </div>
-                      <div class="flex items-center gap-2 mt-2">
-                        <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]"></span>
-                        <p class="text-[11px] font-medium text-slate-500 dark:text-slate-400">
-                          อ้างอิงจากข้อมูล: <span class="font-bold text-slate-800 dark:text-slate-200">"{{ activeRequestData?.query || 'ไม่ระบุ' }}"</span>
-                        </p>
-                      </div>
-                   </div>
-                </div>
-                <div class="flex items-center gap-2">
-                   <button @click="isModalFullscreen = !isModalFullscreen" class="p-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 rounded-full transition-colors text-slate-500">
-                     <Minimize2 v-if="isModalFullscreen" class="w-5 h-5" />
-                     <Maximize2 v-else class="w-5 h-5" />
-                   </button>
-                   <button @click="closeModal" class="p-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 rounded-full transition-colors">
-                     <X class="w-5 h-5 text-slate-500" />
-                   </button>
-                 </div>
-              </div>
+            <div class="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 rounded-t-[2rem] shrink-0 transition-all duration-300" :class="isReferenceExpanded ? 'px-6 pt-6' : 'px-4 pt-2'">
               
-              <!-- Tabs -->
-              <div class="flex justify-between items-end">
-                <div class="flex gap-4">
-                  <button @click="switchTab('analyze')" class="px-6 py-3 font-bold text-sm border-b-2 transition-colors flex items-center gap-2" :class="activeModalTab === 'analyze' ? 'border-violet-600 text-violet-700 dark:text-violet-400' : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'">
-                    <BarChart3 class="w-4 h-4" /> สรุปข้อมูลด้วย AI
+              <!-- Upper Header (Title & Controls) -->
+              <transition name="expand">
+                <div v-if="isReferenceExpanded" class="flex justify-between items-start mb-4 overflow-hidden">
+                  <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-xl bg-violet-500/10 flex items-center justify-center shrink-0">
+                      <Sparkles class="w-5 h-5 text-violet-600 dark:text-violet-400" v-if="activeModalTab === 'analyze'" />
+                      <Bot class="w-5 h-5 text-blue-600 dark:text-blue-400" v-else />
+                    </div>
+                    <div>
+                        <div class="flex items-center gap-2 mb-0.5">
+                          <h3 class="font-black text-slate-900 dark:text-white text-lg">AI Assistant</h3>
+                          <span class="px-2 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 text-[10px] font-black rounded-full uppercase tracking-widest">Beta</span>
+                        </div>
+                        <div class="flex items-center gap-2 mt-1">
+                          <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)] shrink-0"></span>
+                          <p class="text-[11px] font-medium text-slate-500 dark:text-slate-400 italic line-clamp-1">
+                            อ้างอิงจากข้อมูล: <span class="font-bold text-slate-800 dark:text-slate-200">"{{ activeRequestData?.query || 'ไม่ระบุ' }}"</span>
+                          </p>
+                        </div>
+                    </div>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <button @click="isReferenceExpanded = false" class="p-2 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors text-slate-500 shadow-sm border border-slate-200 dark:border-slate-700" title="ซ่อนรายละเอียด">
+                      <ChevronUp class="w-4 h-4" />
+                    </button>
+                    <button @click="isModalFullscreen = !isModalFullscreen" class="p-2 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors text-slate-500 shadow-sm border border-slate-200 dark:border-slate-700">
+                      <Minimize2 v-if="isModalFullscreen" class="w-5 h-5" />
+                      <Maximize2 v-else class="w-5 h-5" />
+                    </button>
+                    <button @click="closeModal" class="p-2 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors shadow-sm border border-slate-200 dark:border-slate-700">
+                      <X class="w-5 h-5 text-slate-500" />
+                    </button>
+                  </div>
+                </div>
+              </transition>
+              
+              <!-- Tabs row -->
+              <div class="flex justify-between items-end gap-4">
+                <div class="flex gap-2 md:gap-4 overflow-x-auto no-scrollbar shrink-0">
+                  <button @click="switchTab('analyze')" class="px-4 md:px-6 py-3 font-bold text-xs md:text-sm border-b-2 transition-colors flex items-center gap-2 whitespace-nowrap" :class="activeModalTab === 'analyze' ? 'border-violet-600 text-violet-700 dark:text-violet-400' : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'">
+                    <BarChart3 class="w-4 h-4" /> สรุปข้อมูล
                   </button>
-                  <button @click="switchTab('chat')" class="px-6 py-3 font-bold text-sm border-b-2 transition-colors flex items-center gap-2" :class="activeModalTab === 'chat' ? 'border-blue-600 text-blue-700 dark:text-blue-400' : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'">
+                  <button @click="switchTab('chat')" class="px-4 md:px-6 py-3 font-bold text-xs md:text-sm border-b-2 transition-colors flex items-center gap-2 whitespace-nowrap" :class="activeModalTab === 'chat' ? 'border-blue-600 text-blue-700 dark:text-blue-400' : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'">
                     <Bot class="w-4 h-4" /> แชตกับ AI
                   </button>
                 </div>
+
+                <!-- Compact Context Indicator (แสดงเฉพาะตอนซ่อนด้านบน) -->
+                <div v-if="!isReferenceExpanded" class="flex-1 min-w-0 hidden sm:flex items-center gap-2 px-3 py-1.5 bg-slate-100/50 dark:bg-slate-800/40 rounded-xl mb-2 group/ref cursor-help" :title="activeRequestData?.query">
+                  <span class="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest shrink-0">อ้างอิง:</span>
+                  <p class="text-[10px] font-medium text-slate-500 dark:text-slate-400 italic truncate border-l border-slate-200 dark:border-slate-700 pl-2">
+                    "{{ activeRequestData?.query }}"
+                  </p>
+                </div>
                 
-                <!-- Action Buttons -->
-                <div class="mb-2 flex items-center gap-2">
-                  <!-- สรุปข้อมูลใหม่ (สำหรับ Analyze Tab) -->
-                  <div v-if="activeModalTab === 'analyze' && analyzeState[activeModalRequestId!]?.summary" class="flex items-center gap-2">
+                <!-- Action Buttons & Compact Controls -->
+                <div class="mb-2 flex items-center gap-2 shrink-0">
+                  <!-- Analyze Actions -->
+                  <div v-if="activeModalTab === 'analyze' && activeModalRequestId && analyzeState[activeModalRequestId]?.summary" class="hidden md:flex items-center gap-2">
                     <button 
-                      @click="toggleSpeak(analyzeState[activeModalRequestId!]!.summary!, 'summary-' + activeModalRequestId)" 
-                      class="flex items-center gap-2 px-3 py-1.5 bg-slate-50 hover:bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 text-[11px] font-bold rounded-xl border border-slate-200/50 dark:border-slate-800/50 transition-all active:scale-95 shadow-sm"
-                      :title="currentlyReadingId === 'summary-' + activeModalRequestId ? 'หยุดอ่าน' : 'อ่านให้ฟัง'"
+                      @click="activeModalRequestId && toggleSpeak(analyzeState[activeModalRequestId]?.summary || '', 'summary-' + activeModalRequestId)" 
+                      class="flex items-center gap-2 px-3 py-1.5 bg-white hover:bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 text-[10px] font-bold rounded-xl border border-slate-200/50 dark:border-slate-800/50 transition-all active:scale-95 shadow-sm"
                     >
-                      <Volume2 v-if="currentlyReadingId !== 'summary-' + activeModalRequestId" class="w-3.5 h-3.5" />
-                      <Square v-else class="w-3.5 h-3.5 fill-current" />
-                      {{ currentlyReadingId === 'summary-' + activeModalRequestId ? 'กำลังอ่าน...' : 'อ่านสรุป' }}
+                      <Volume2 v-if="currentlyReadingId !== 'summary-' + activeModalRequestId" class="w-3 h-3" />
+                      <Square v-else class="w-3 h-3 fill-current text-blue-500" />
+                      {{ currentlyReadingId === 'summary-' + activeModalRequestId ? 'หยุดอ่าน' : 'อ่าน' }}
                     </button>
 
                     <button 
-                      @click="analyzeData(activeModalRequestId!)" 
-                      :disabled="analyzeState[activeModalRequestId!]?.loading"
-                      class="flex items-center gap-2 px-3 py-1.5 bg-violet-50 hover:bg-violet-100 dark:bg-violet-900/20 text-violet-700 dark:text-violet-400 text-[11px] font-bold rounded-full border border-violet-200/50 dark:border-violet-800/50 transition-all active:scale-95 disabled:opacity-50 shadow-sm"
+                      @click="analyzeData(activeModalRequestId)" 
+                      class="flex items-center gap-2 px-3 py-1.5 bg-white hover:bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 text-[10px] font-bold rounded-xl border border-slate-200/50 dark:border-slate-800/50 transition-all active:scale-95 shadow-sm"
+                      :disabled="!activeModalRequestId || analyzeState[activeModalRequestId]?.loading"
                     >
-                      <RotateCcw class="w-3.5 h-3.5" :class="analyzeState[activeModalRequestId!]?.loading ? 'animate-spin' : ''" />
-                      สรุปใหม่
+                      <RotateCcw class="w-3 h-3" :class="{ 'animate-spin': analyzeState[activeModalRequestId!]?.loading }" />
+                      วิเคราะห์ใหม่
                     </button>
                   </div>
 
-                  <!-- ล้างประวัติแชต (สำหรับ Chat Tab) -->
-                  <button 
-                    v-if="activeModalTab === 'chat' && chatState[activeModalRequestId!]?.messages?.length"
-                    @click="clearChatHistory(activeModalRequestId!)" 
-                    class="flex items-center gap-2 px-3 py-1.5 bg-slate-50 hover:bg-rose-50 dark:bg-slate-800 dark:hover:bg-rose-900/20 text-slate-500 hover:text-rose-600 dark:text-slate-400 dark:hover:text-rose-400 text-[11px] font-bold rounded-xl border border-slate-200/50 dark:border-slate-800/50 hover:border-rose-200 dark:hover:border-rose-800 transition-all active:scale-95 shadow-sm"
-                  >
-                    <RotateCcw class="w-3.5 h-3.5" />
-                    ล้างประวัติ
-                  </button>
+                  <!-- Chat Actions -->
+                  <div v-if="activeModalTab === 'chat' && activeModalRequestId && chatState[activeModalRequestId]?.messages?.length" class="hidden md:flex items-center gap-2">
+                    <button 
+                      @click="activeModalRequestId && clearChatHistory(activeModalRequestId)"
+                      class="flex items-center gap-2 px-3 py-1.5 bg-white hover:bg-rose-50 dark:bg-slate-800 text-slate-600 dark:text-rose-400 text-[10px] font-bold rounded-xl border border-slate-200/50 dark:border-slate-800/50 transition-all active:scale-95 shadow-sm"
+                    >
+                      <Trash2 class="w-3 h-3 text-rose-500" />
+                      เคลียร์ประวัติ
+                    </button>
+                  </div>
+
+                  <!-- Controls when Compact -->
+                  <div v-if="!isReferenceExpanded" class="flex items-center gap-1.5 ml-2 border-l border-slate-200 dark:border-slate-800 pl-3">
+                    <button @click="isReferenceExpanded = true" class="p-1.5 bg-blue-50 hover:bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-lg transition-all" title="แสดงรายละเอียด">
+                      <ChevronDown class="w-4 h-4" />
+                    </button>
+                    <button @click="isModalFullscreen = !isModalFullscreen" class="p-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 rounded-lg transition-all text-slate-500">
+                      <Minimize2 v-if="isModalFullscreen" class="w-4 h-4" />
+                      <Maximize2 v-else class="w-4 h-4" />
+                    </button>
+                    <button @click="closeModal" class="p-1.5 bg-slate-100 hover:bg-rose-100 dark:bg-slate-800 dark:hover:bg-rose-900/40 rounded-lg transition-all text-slate-500 hover:text-rose-600">
+                      <X class="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
             
             <!-- Content Area -->
             <div class="flex-1 flex flex-col p-6 bg-white dark:bg-slate-900 rounded-b-[2rem] overflow-hidden">
-              <!-- Analyze Tab -->
               <div v-if="activeModalTab === 'analyze'" class="flex-1 overflow-y-auto space-y-6 custom-scrollbar pr-1">
-                  <!-- ปุ่มเริ่มวิเคราะห์ (แสดงเฉพาะเมื่อยังไม่มีข้อมูล) -->
-                  <div v-if="!analyzeState[activeModalRequestId]?.summary && !analyzeState[activeModalRequestId]?.loading" class="flex justify-center py-10">
-                     <button @click="analyzeData(activeModalRequestId)" class="flex items-center gap-2 px-6 py-3 bg-violet-600 hover:bg-violet-700 text-white font-bold text-sm rounded-2xl transition-all shadow-lg shadow-violet-500/25 active:scale-95">
+                  <div v-if="!analyzeState[activeModalRequestId!]?.summary && !analyzeState[activeModalRequestId!]?.loading" class="flex justify-center py-10">
+                     <button @click="analyzeData(activeModalRequestId!)" class="flex items-center gap-2 px-6 py-3 bg-violet-600 hover:bg-violet-700 text-white font-bold text-sm rounded-2xl transition-all shadow-lg shadow-violet-500/25 active:scale-95">
                         <Sparkles class="w-4 h-4" />
                         เริ่มวิเคราะห์ข้อมูลด้วย AI
                      </button>
                   </div>
                  
-                 <div v-if="analyzeState[activeModalRequestId]?.error" class="p-5 bg-rose-50 dark:bg-rose-900/10 border border-rose-100 dark:border-rose-800/50 rounded-2xl text-rose-600 dark:text-rose-400 text-sm font-medium">
-
-                   ❌ {{ analyzeState[activeModalRequestId]?.error }}
+                 <div v-if="analyzeState[activeModalRequestId!]?.error" class="p-5 bg-rose-50 dark:bg-rose-900/10 border border-rose-100 dark:border-rose-800/50 rounded-2xl text-rose-600 dark:text-rose-400 text-sm font-medium">
+                   ❌ {{ analyzeState[activeModalRequestId!]?.error }}
                  </div>
                  
-                 <div v-else-if="analyzeState[activeModalRequestId]?.summary" class="p-6 bg-slate-50 dark:bg-slate-950/50 rounded-2xl border border-slate-100 dark:border-slate-800 text-slate-700 dark:text-slate-300 text-sm leading-relaxed font-medium" v-html="renderMarkdown(analyzeState[activeModalRequestId]?.summary || '')"></div>
+                 <div v-else-if="analyzeState[activeModalRequestId!]?.summary" class="p-6 bg-slate-50 dark:bg-slate-950/50 rounded-2xl border border-slate-100 dark:border-slate-800 text-slate-700 dark:text-slate-300 text-sm leading-relaxed font-medium" v-html="renderMarkdown(analyzeState[activeModalRequestId!]?.summary || '')"></div>
                  
-                 <div v-else-if="analyzeState[activeModalRequestId]?.loading" class="flex flex-col items-center justify-center py-20 text-slate-400 gap-4">
+                 <div v-else-if="analyzeState[activeModalRequestId!]?.loading" class="flex flex-col items-center justify-center py-20 text-slate-400 gap-4">
                    <Loader2 class="w-8 h-8 animate-spin text-violet-500" />
                    <p class="font-bold text-sm">กำลังวิเคราะห์ข้อมูล กรุณารอสักครู่...</p>
                  </div>
-                 
-                 <div v-else class="flex flex-col items-center justify-center py-20 text-slate-400 gap-4">
-                   <BarChart3 class="w-12 h-12 text-slate-300 dark:text-slate-700" />
-                   <p class="font-medium text-sm">คลิก "เริ่มวิเคราะห์ข้อมูล" ด้านบนเพื่อให้ AI สรุปสาระสำคัญให้คุณ</p>
-                 </div>
               </div>
               
-              <!-- Chat Tab -->
               <div v-else-if="activeModalTab === 'chat'" class="flex-1 flex flex-col min-h-0">
-                 
-                 <!-- Messages -->
                  <div class="relative flex-1 flex flex-col min-h-0 mb-4">
-
                     <div 
                       :ref="el => { chatScrollRefs[activeModalRequestId!] = el as HTMLElement }" 
                       @scroll="handleChatScroll"
                       class="flex-1 overflow-y-auto space-y-4 pr-2 scroll-smooth custom-scrollbar"
                     >
-                      <div v-if="!chatState[activeModalRequestId]?.messages?.length" class="flex flex-col items-center justify-center h-full gap-3 text-slate-400 dark:text-slate-600">
-                        <Bot class="w-10 h-10" />
-                        <p class="text-sm font-medium text-center">ถามอะไรเกี่ยวกับข้อมูลนี้ก็ได้<br>เช่น "ข้อมูลมีอะไรน่าสนใจบ้าง?"</p>
-                      </div>
-                      <div v-for="(msg, idx) in chatState[activeModalRequestId]?.messages" :key="idx" class="flex gap-3" :class="msg.role === 'user' ? 'justify-end' : 'justify-start'">
+                      <div v-for="(msg, idx) in chatState[activeModalRequestId!]?.messages" :key="idx" class="flex gap-3" :class="msg.role === 'user' ? 'justify-end' : 'justify-start'">
                         <div v-if="msg.role === 'ai'" class="flex flex-col items-center gap-2 mt-1">
                           <div class="w-8 h-8 rounded-xl bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
                             <Bot class="w-4 h-4" />
                           </div>
-                          <!-- ปุ่มลำโพงสำหรับ Chat -->
-                          <button 
-                            @click="toggleSpeak(msg.content, 'chat-' + idx)"
-                            class="p-1.5 rounded-lg bg-slate-50 dark:bg-slate-800 text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors shadow-sm border border-slate-100 dark:border-slate-800"
-                            :class="currentlyReadingId === 'chat-' + idx ? 'text-blue-600 animate-pulse' : ''"
-                          >
+                          <button @click="toggleSpeak(msg.content, 'chat-' + idx)" class="p-1.5 rounded-lg bg-slate-50 dark:bg-slate-800 text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors shadow-sm border border-slate-100 dark:border-slate-800" :class="currentlyReadingId === 'chat-' + idx ? 'text-blue-600 animate-pulse' : ''">
                             <Volume2 v-if="currentlyReadingId !== 'chat-' + idx" class="w-3 h-3" />
                             <Square v-else class="w-3 h-3 fill-current" />
                           </button>
                         </div>
                         <div class="max-w-[85%] px-5 py-4 rounded-2xl text-sm leading-relaxed" :class="msg.role === 'user' ? 'bg-blue-600 text-white rounded-br-sm whitespace-pre-wrap' : 'bg-slate-50 dark:bg-slate-950 border border-slate-100 dark:border-slate-800 text-slate-800 dark:text-slate-200 rounded-bl-sm font-medium shadow-sm'" v-html="msg.role === 'ai' ? renderMarkdown(msg.content) : msg.content.replace(/</g, '&lt;').replace(/>/g, '&gt;')"></div>
                       </div>
-                      <!-- Loading -->
-                      <div v-if="chatState[activeModalRequestId]?.loading" class="flex gap-3 justify-start">
+                      <div v-if="chatState[activeModalRequestId!]?.loading" class="flex gap-3 justify-start">
                         <div class="w-8 h-8 rounded-xl bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
                           <Bot class="w-4 h-4" />
                         </div>
@@ -988,9 +1177,21 @@ onUnmounted(() => {
                     </transition>
                  </div>
                  
-                 <!-- Input -->
-                 <div class="flex gap-3 items-end pt-4 border-t border-slate-100 dark:border-slate-800 mt-auto shrink-0">
-                   <textarea v-model="chatState[activeModalRequestId]!.input" @keydown.enter.exact.prevent="sendChat(activeModalRequestId!)" placeholder="พิมพ์คำถามเกี่ยวกับข้อมูลนี้... (Enter เพื่อส่ง)" rows="2" class="flex-1 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-3 text-sm text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 transition-all resize-none leading-relaxed shadow-inner"></textarea>
+                 <!-- Suggested Questions (Quick Replies) -->
+                  <div v-if="activeModalRequestId && chatState[activeModalRequestId!]?.messages?.length === 0 && !chatState[activeModalRequestId!]?.loading" class="flex flex-wrap gap-2 mb-4 px-1 animate-in fade-in slide-in-from-bottom-2 duration-500">
+                    <button 
+                      v-for="q in ['สรุปภาพรวมข้อมูลนี้', 'มีข้อมูลไหนผิดปกติไหม?', 'ช่วยสร้างตารางสรุปยอดให้ที', 'วิเคราะห์แนวโน้มสำคัญ']" 
+                      :key="q"
+                      @click="activeModalRequestId && handleQuickReply(activeModalRequestId, q)"
+                      class="px-4 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-blue-600 hover:text-white dark:hover:bg-blue-600 dark:hover:text-white text-slate-600 dark:text-slate-400 text-[11px] font-black rounded-xl transition-all border border-slate-200 dark:border-slate-700 hover:border-blue-500 active:scale-95 shadow-sm uppercase tracking-wider"
+                    >
+                      {{ q }}
+                    </button>
+                  </div>
+
+                  <!-- Input -->
+                  <div class="flex gap-3 items-end pt-4 border-t border-slate-100 dark:border-slate-800 mt-auto shrink-0">
+                   <textarea ref="chatInput" v-model="chatState[activeModalRequestId!]!.input" @keydown.enter.exact.prevent="sendChat(activeModalRequestId!)" placeholder="พิมพ์คำถามเกี่ยวกับข้อมูลนี้... (Enter เพื่อส่ง)" rows="2" class="flex-1 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-3 text-sm text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 transition-all resize-none leading-relaxed shadow-inner"></textarea>
                    
                    <!-- ปุ่มส่ง หรือ ปุ่มหยุด -->
                    <button 
@@ -1021,7 +1222,7 @@ onUnmounted(() => {
     <Teleport to="body">
       <transition name="fade">
         <div v-if="isSqlModalOpen" class="fixed inset-0 z-[110] flex items-center justify-center p-4">
-          <div class="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" @click="isSqlModalOpen = false"></div>
+          <div class="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"></div>
           
           <div class="relative w-full max-w-4xl bg-white dark:bg-slate-900 rounded-[2.5rem] shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden flex flex-col max-h-[90vh]">
             <!-- Header -->
@@ -1090,7 +1291,7 @@ onUnmounted(() => {
     <Teleport to="body">
       <transition name="fade">
         <div v-if="renewRequestId" class="fixed inset-0 z-[120] flex items-center justify-center p-4">
-          <div class="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" @click="!isRenewing && (renewRequestId = null)"></div>
+          <div class="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"></div>
           
           <div class="relative w-full max-w-md bg-white dark:bg-slate-900 rounded-[2rem] shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden animate-in zoom-in-95 duration-200">
             <!-- Header -->
@@ -1141,6 +1342,84 @@ onUnmounted(() => {
       </transition>
     </Teleport>
   </ClientOnly>
+
+  <!-- Fixed Top Loading Bar (Teleport to Body) -->
+  <ClientOnly>
+    <Teleport to="body">
+      <div v-if="isSearching" class="fixed top-0 left-0 right-0 z-[2000] h-1.5 bg-blue-100/50 dark:bg-blue-900/20 overflow-hidden">
+        <div class="h-full bg-blue-600 w-1/3 animate-progress-slide rounded-full shadow-[0_0_15px_rgba(37,99,235,0.8)]"></div>
+      </div>
+    </Teleport>
+  </ClientOnly>
+
+  <!-- Edit Zoho Link Modal -->
+  <ClientOnly>
+    <Teleport to="body">
+      <transition name="modal">
+        <div v-if="editZohoModal" class="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md" @click.self="editZohoModal = false">
+          <div class="bg-white dark:bg-[#1a1a1a] rounded-2xl shadow-2xl w-full max-w-md border border-slate-200 dark:border-white/10 overflow-hidden">
+            <div class="p-5 border-b border-slate-100 dark:border-white/5 flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <LayoutGrid class="w-4 h-4 text-blue-500" />
+                <h3 class="font-bold text-slate-900 dark:text-white">แก้ไข Zoho Link</h3>
+              </div>
+              <button @click="editZohoModal = false" class="p-1.5 hover:bg-slate-100 dark:hover:bg-white/5 rounded-lg transition-colors text-slate-400">
+                <X class="w-4 h-4" />
+              </button>
+            </div>
+            <div class="p-5 space-y-4">
+              <!-- ลิ้งค์จริง (Admin only) -->
+              <div>
+                <label class="text-xs font-bold text-slate-500 dark:text-white/40 uppercase tracking-widest mb-2 block">ลิ้งค์ไฟล์ (Admin เท่านั้น)</label>
+                <input
+                  v-model="editZohoLink"
+                  type="url"
+                  placeholder="https://workdrive.zoho.com/file/..."
+                  class="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl px-4 py-3 text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-white/20 outline-none focus:border-blue-500/50 transition-all"
+                />
+                <p class="text-[11px] text-slate-400 dark:text-white/30 mt-1">ลิ้งค์ต้นฉบับจาก WorkDrive — เห็นได้เฉพาะ Admin</p>
+              </div>
+              <!-- Share Link (ทุก role เห็น) -->
+              <div>
+                <label class="text-xs font-bold text-slate-500 dark:text-white/40 uppercase tracking-widest mb-2 block">Share Link (ทุกคนเห็น)</label>
+                <input
+                  v-model="editZohoShareLink"
+                  type="url"
+                  placeholder="https://workdrive.zoho.com/external/..."
+                  class="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl px-4 py-3 text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-white/20 outline-none focus:border-emerald-500/50 transition-all"
+                />
+                <p class="text-[11px] text-slate-400 dark:text-white/30 mt-1">External Share Link ที่สร้างจาก Zoho WorkDrive UI</p>
+              </div>
+              <!-- Password -->
+              <div>
+                <label class="text-xs font-bold text-slate-500 dark:text-white/40 uppercase tracking-widest mb-2 block">รหัสผ่าน Share Link</label>
+                <input
+                  v-model="editZohoSharePassword"
+                  type="text"
+                  placeholder="ถ้าไม่มีรหัสผ่านให้เว้นว่าง"
+                  class="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl px-4 py-3 text-sm font-mono text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-white/20 outline-none focus:border-emerald-500/50 transition-all"
+                  @keydown.enter="saveZohoLink"
+                />
+              </div>
+            </div>
+            <div class="p-5 border-t border-slate-100 dark:border-white/5 flex items-center justify-end gap-3">
+              <button @click="editZohoModal = false" class="px-5 py-2 text-xs font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-white/5 rounded-xl transition-all border border-slate-200 dark:border-white/10">
+                ยกเลิก
+              </button>
+              <button
+                @click="saveZohoLink"
+                :disabled="isSavingZohoLink"
+                class="px-6 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-bold rounded-xl transition-all flex items-center gap-2"
+              >
+                <Loader2 v-if="isSavingZohoLink" class="w-3.5 h-3.5 animate-spin" />
+                บันทึก
+              </button>
+            </div>
+          </div>
+        </div>
+      </transition>
+    </Teleport>
+  </ClientOnly>
 </template>
 
 <style scoped>
@@ -1162,5 +1441,14 @@ onUnmounted(() => {
 }
 .fade-enter-from, .fade-leave-to {
   opacity: 0;
+}
+
+@keyframes progress-slide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(300%); }
+}
+
+.animate-progress-slide {
+  animation: progress-slide 1.5s infinite linear;
 }
 </style>

@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:www.zoho.com)",
+      "WebFetch(domain:workdrive.zoho.com)",
+      "WebSearch",
+      "WebFetch(domain:sheet.zoho.com)",
+      "Bash(findstr -i \"xlsx\\\\|exceljs\\\\|sheet\")",
+      "Bash(npm install *)",
+      "WebFetch(domain:www.theworkflowacademy.com)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:help.zoho.com)",
+      "Bash(npm uninstall *)"
+    ]
+  }
+}

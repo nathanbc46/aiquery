@@ -100,7 +100,7 @@ const openSqlModal = (id: string, sql: string, explanation: string) => {
 
 const copyToClipboard = async (text: string) => {
   try {
-    await navigator.clipboard.writeText(text)
+    await navigator.clipboard.writeText(formatSql(text))
     toast.success('คัดลอกแล้ว', 'คัดลอกคำสั่ง SQL ลง Clipboard เรียบร้อย')
   } catch (e) {
     toast.error('ล้มเหลว', 'ไม่สามารถคัดลอกข้อความได้')
@@ -112,15 +112,18 @@ const isRejectModalOpen = ref(false)
 const rejectReason = ref('')
 const requestToReject = ref<string | null>(null)
 
-// Data Preview Modal State
 const isPreviewModalOpen = ref(false)
 const previewData = ref<any[]>([])
 const isPreviewLoading = ref(false)
+const previewError = ref<string | null>(null)
+const previewSqlAttempt = ref('')
 
 const openPreview = async (sqlQuery: string) => {
   isPreviewLoading.value = true
   isPreviewModalOpen.value = true
   previewData.value = []
+  previewError.value = null
+  previewSqlAttempt.value = sqlQuery
   
   try {
     const response = await $fetch<any>('/api/ai-query/preview', {
@@ -131,12 +134,12 @@ const openPreview = async (sqlQuery: string) => {
     if (response.success) {
       previewData.value = response.data
     } else {
-      toast.error('เกิดข้อผิดพลาด', response.error || 'ไม่สามารถดึงข้อมูลตัวอย่างได้')
-      isPreviewModalOpen.value = false
+      previewError.value = response.error || 'ไม่สามารถดึงข้อมูลตัวอย่างได้'
+      toast.error('เกิดข้อผิดพลาด', previewError.value ?? undefined)
     }
-  } catch (e) {
-    toast.error('ล้มเหลว', 'การเชื่อมต่อฐานข้อมูลขัดข้อง')
-    isPreviewModalOpen.value = false
+  } catch (e: any) {
+    previewError.value = e.data?.message || 'การเชื่อมต่อฐานข้อมูลขัดข้อง'
+    toast.error('ล้มเหลว', previewError.value ?? undefined)
   } finally {
     isPreviewLoading.value = false
   }
@@ -603,6 +606,24 @@ const confirmReject = async () => {
                       </tr>
                     </tbody>
                   </table>
+                </div>
+
+                <div v-else-if="previewError" class="h-full flex flex-col items-center justify-center p-12 text-center">
+                  <div class="w-20 h-20 bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400 rounded-full flex items-center justify-center mb-6 border border-rose-100 dark:border-rose-800">
+                    <AlertTriangle class="w-10 h-10" />
+                  </div>
+                  <h4 class="text-xl font-black text-rose-600 dark:text-rose-400 mb-2">SQL Execution Error</h4>
+                  <p class="text-slate-500 dark:text-slate-400 max-w-lg mb-6 leading-relaxed">{{ previewError }}</p>
+                  
+                  <div class="w-full max-w-3xl bg-slate-900 rounded-2xl p-6 text-left border border-rose-900/30 shadow-2xl">
+                    <div class="flex items-center justify-between mb-3">
+                       <span class="text-[10px] font-black text-rose-400 uppercase tracking-widest">Failed SQL Query:</span>
+                       <button @click="copyToClipboard(previewSqlAttempt)" class="text-rose-400 hover:text-rose-300 transition-colors">
+                         <Copy class="w-3.5 h-3.5" />
+                       </button>
+                    </div>
+                    <pre class="text-xs font-mono text-rose-200 whitespace-pre-wrap leading-relaxed">{{ previewSqlAttempt }}</pre>
+                  </div>
                 </div>
 
                 <div v-else class="h-full flex flex-col items-center justify-center p-20 text-center">

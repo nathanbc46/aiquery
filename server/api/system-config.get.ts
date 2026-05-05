@@ -1,6 +1,6 @@
 import { useDb } from '../utils/db';
 import { aiSettings } from '../utils/schema';
-import { DEFAULT_MAX_RESULTS_LIMIT } from '../utils/constants';
+import { DEFAULT_MAX_RESULTS_LIMIT, SUGGESTED_QUERIES } from '../utils/constants';
 
 export default defineEventHandler(async (event) => {
   try {
@@ -10,11 +10,13 @@ export default defineEventHandler(async (event) => {
     }).from(aiSettings).limit(1);
 
     return {
-      maxResultsLimit: settings[0]?.maxResultsLimit || DEFAULT_MAX_RESULTS_LIMIT
+      maxResultsLimit: settings[0]?.maxResultsLimit || DEFAULT_MAX_RESULTS_LIMIT,
+      suggestions: SUGGESTED_QUERIES
     };
   } catch (error) {
     return {
-      maxResultsLimit: DEFAULT_MAX_RESULTS_LIMIT
+      maxResultsLimit: DEFAULT_MAX_RESULTS_LIMIT,
+      suggestions: SUGGESTED_QUERIES
     };
   }
 });

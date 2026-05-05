@@ -2,6 +2,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { useDb } from '../../utils/db';
 import { aiSettings } from '../../utils/schema';
 import { eq } from 'drizzle-orm';
+import { DEFAULT_REFINE_INSTRUCTION, DEFAULT_REFINE_MODEL, DEFAULT_GENERATE_INSTRUCTION } from '../../utils/constants';
 
 export default defineEventHandler(async (event) => {
   const body = await readBody(event);
@@ -17,30 +18,29 @@ export default defineEventHandler(async (event) => {
   }
 
   const db = await useDb();
-  let modelName = 'gemini-3.1-flash-lite-preview';
-  let systemPrompt = `
-คุณคือผู้เชี่ยวชาญด้านการเขียน Prompt สำหรับระบบ Text-to-SQL (Vtiger CRM).
-หน้าที่ของคุณคือรับ "คำถามภาษาไทย" จากผู้ใช้ และปรับปรุงให้เป็นประโยคที่ชัดเจนขึ้น เพื่อให้ AI ตัวอื่นนำไปสร้าง SQL ได้ถูกต้องที่สุด.
+  let modelName = DEFAULT_REFINE_MODEL;
+  let systemPrompt = DEFAULT_REFINE_INSTRUCTION;
 
-กฎการทำงาน:
-1. คงเนื้อหาเดิมของผู้ใช้ไว้ แต่ขยายความให้ชัดเจน (เช่น ระบุชื่อตารางที่เกี่ยวข้อง: Accounts, Contacts, Products, SalesOrder).
-2. ถ้าผู้ใช้ไม่ได้ระบุ Column ให้แนะนำ Column พื้นฐานที่ควรมี (เช่น ชื่อบริษัท, เบอร์โทร, วันที่สร้าง).
-3. ใช้ภาษาไทยที่สุภาพและเป็นมืออาชีพ.
-4. ตอบกลับเฉพาะ "ประโยคที่ปรับปรุงแล้วเท่านั้น" ไม่ต้องมีคำอธิบายอื่น.
-  `.trim();
 
   try {
     const settings = await db.select().from(aiSettings).where(eq(aiSettings.id, 'global')).limit(1);
     const config = settings[0];
+    
+    const schemaContext = config?.generateSystemInstruction || DEFAULT_GENERATE_INSTRUCTION;
+
     if (config) {
       modelName = config.refineModel;
       systemPrompt = config.refineSystemPrompt;
     }
 
+    // Add schema context to the system prompt
+    const finalSystemPrompt = `${systemPrompt}\n\nนี่คือข้อมูลโครงสร้างฐานข้อมูล (Schema Context) เพื่อใช้ประกอบการขัดเกลาคำถาม:\n${schemaContext}`;
+
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({ model: modelName });
 
-    const result = await model.generateContent([systemPrompt, prompt as string]);
+    const result = await model.generateContent([finalSystemPrompt, prompt as string]);
+
     const refinedText = result.response.text().trim();
 
     return {

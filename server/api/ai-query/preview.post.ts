@@ -33,16 +33,19 @@ export default defineEventHandler(async (event) => {
   // Remove trailing semicolon if any (prevent syntax error when appending LIMIT)
   let cleanSql = query.trim().replace(/;$/, '')
 
-  // Force limit to 10 for preview
+  // Force limit for preview based on role
+  const isAdminOrManager = session.role === 'admin' || session.role === 'manager';
+  const previewLimit = isAdminOrManager ? 50 : 10;
+  
   let previewSql = cleanSql
-  const limitRegex = /LIMIT\s+\d+/gi
+  const limitRegex = /LIMIT\s+\d+$/i
   
   if (limitRegex.test(previewSql)) {
-    // If LIMIT exists, replace it with LIMIT 10
-    previewSql = previewSql.replace(limitRegex, 'LIMIT 10')
+    // If LIMIT exists at the end, replace it with appropriate limit
+    previewSql = previewSql.replace(limitRegex, `LIMIT ${previewLimit}`)
   } else {
-    // If no LIMIT, append it
-    previewSql = `${previewSql} LIMIT 10`
+    // If no LIMIT at the end, append it
+    previewSql = `${previewSql} LIMIT ${previewLimit}`
   }
 
   try {
