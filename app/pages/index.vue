@@ -80,6 +80,9 @@ const isSavingFavorite = ref(false)
 const isFavoriteModalOpen = ref(false)
 const favoriteTitle = ref('')
 
+// CSV download confirmation modal
+const isCsvConfirmModalOpen = ref(false)
+
 // Delete confirmation state
 const isDeleteConfirmModalOpen = ref(false)
 const favoriteToDelete = ref<any>(null)
@@ -1013,8 +1016,8 @@ const highlightSql = (sqlStr: string) => {
               <!-- Primary Action Group -->
               <div class="w-full sm:w-auto relative group/export">
                 <div v-if="isAdmin" class="flex items-stretch shadow-2xl shadow-emerald-500/30 rounded-[2rem] overflow-hidden">
-                  <button 
-                    @click="requestApproval"
+                  <button
+                    @click="isCsvConfirmModalOpen = true"
                     :disabled="isRequesting || generatedResult.previewCount === 0"
                     class="flex-1 px-8 py-5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:grayscale text-white text-sm font-black transition-all flex items-center justify-center gap-3 active:scale-95 uppercase tracking-widest border-r border-emerald-500/50"
                   >
@@ -1657,6 +1660,48 @@ const highlightSql = (sqlStr: string) => {
                 >
                   เข้าใจแล้ว
                 </button>
+              </div>
+            </div>
+          </div>
+        </transition>
+      </Teleport>
+    </ClientOnly>
+
+    <!-- CSV Download Confirmation Modal -->
+    <ClientOnly>
+      <Teleport to="body">
+        <transition name="modal">
+          <div v-if="isCsvConfirmModalOpen" class="fixed inset-0 z-[140] flex items-center justify-center p-6 bg-slate-900/80 backdrop-blur-md">
+            <div class="bg-white dark:bg-slate-900 rounded-[2.5rem] shadow-2xl w-full max-w-sm overflow-hidden border border-slate-200 dark:border-slate-800 animate-in zoom-in-95 duration-300" @click.stop>
+              <div class="p-8 text-center space-y-6">
+                <div class="w-20 h-20 bg-emerald-50 dark:bg-emerald-900/20 rounded-full flex items-center justify-center text-emerald-600 mx-auto border border-emerald-100 dark:border-emerald-800/50">
+                  <Download class="w-10 h-10" />
+                </div>
+
+                <div class="space-y-2">
+                  <h3 class="text-xl font-black text-slate-900 dark:text-white">ยืนยันการดาวน์โหลด CSV</h3>
+                  <p class="text-sm text-slate-500 dark:text-slate-400 font-medium leading-relaxed">
+                    ระบบจะ<b class="text-slate-700 dark:text-slate-200">อนุมัติคำขอนี้อัตโนมัติ</b> บันทึกลงประวัติการใช้งาน และเริ่มดาวน์โหลดไฟล์ CSV ทันที
+                  </p>
+                </div>
+
+                <div class="flex gap-3 pt-2">
+                  <button
+                    @click="isCsvConfirmModalOpen = false"
+                    class="flex-1 py-4 text-xs font-black text-slate-400 hover:text-slate-900 dark:hover:text-white transition-all uppercase tracking-widest"
+                  >
+                    ยกเลิก
+                  </button>
+                  <button
+                    @click="isCsvConfirmModalOpen = false; requestApproval()"
+                    :disabled="isRequesting"
+                    class="flex-1 py-4 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-black rounded-2xl shadow-lg shadow-emerald-500/20 transition-all active:scale-95 uppercase tracking-widest flex items-center justify-center gap-2"
+                  >
+                    <RotateCcw v-if="isRequesting" class="w-4 h-4 animate-spin" />
+                    <Download v-else class="w-4 h-4" />
+                    <span>ยืนยัน / ดาวน์โหลด</span>
+                  </button>
+                </div>
               </div>
             </div>
           </div>
