@@ -6,6 +6,9 @@ import { sendEmail } from '../../utils/mail';
 import { Parser } from '@json2csv/plainjs';
 import { DEFAULT_MAX_RESULTS_LIMIT } from '../../utils/constants';
 
+const escapeHtml = (str: string) =>
+  str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+
 export default defineEventHandler(async (event) => {
   const body = await readBody(event);
   const { requestId, status, reason, expiresAt, managerComment } = body;
@@ -126,7 +129,7 @@ export default defineEventHandler(async (event) => {
                         </tr>
                         <tr>
                           <td style="padding: 0 0 10px; color: #475569; line-height: 1.5; background-color: #ffffff; border-radius: 6px; padding: 10px; border: 1px dashed #e2e8f0;" colspan="2">
-                            ${managerComment}
+                            ${escapeHtml(managerComment)}
                           </td>
                         </tr>` : ''}
 
@@ -137,7 +140,7 @@ export default defineEventHandler(async (event) => {
                         </tr>
                         <tr>
                           <td style="padding: 0 0 10px; color: #f43f5e; line-height: 1.5; background-color: #fff1f2; border-radius: 6px; padding: 10px; border: 1px solid #fecdd3;" colspan="2">
-                            ${reason}
+                            ${escapeHtml(reason)}
                           </td>
                         </tr>` : ''}
 
@@ -183,9 +186,9 @@ export default defineEventHandler(async (event) => {
 
   } catch (error: any) {
     console.error('Update Request Status Error:', error);
-    return {
-      success: false,
-      error: error.message || 'Failed to update request status'
-    };
+    throw createError({
+      statusCode: error.statusCode || 500,
+      statusMessage: error.statusMessage || error.message || 'Failed to update request status',
+    });
   }
 });

@@ -10,7 +10,9 @@
       "WebFetch(domain:www.theworkflowacademy.com)",
       "WebFetch(domain:github.com)",
       "WebFetch(domain:help.zoho.com)",
-      "Bash(npm uninstall *)"
+      "Bash(npm uninstall *)",
+      "Bash(gh pr *)",
+      "Bash(node -e \"console.log\\(require\\('crypto'\\).randomBytes\\(48\\).toString\\('hex'\\)\\)\")"
     ]
   }
 }

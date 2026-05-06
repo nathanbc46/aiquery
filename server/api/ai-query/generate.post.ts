@@ -1,7 +1,8 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { DEFAULT_GENERATE_INSTRUCTION, DEFAULT_MAX_RESULTS_LIMIT } from '../../utils/constants';
 import { useDb } from '../../utils/db';
-import { sql } from 'drizzle-orm';
+import { sql, eq } from 'drizzle-orm';
+import { aiSettings } from '../../utils/schema';
 import { getAuthSession } from '../../utils/auth';
 
 export default defineEventHandler(async (event) => {
@@ -26,11 +27,6 @@ export default defineEventHandler(async (event) => {
 
   try {
     const db = await useDb();
-    
-    // Fetch Settings
-    const { aiSettings } = await import('../../utils/schema');
-    const { eq } = await import('drizzle-orm');
-
     
     let modelName = 'gemini-1.5-flash'; // Fallback
     let maxLimit = DEFAULT_MAX_RESULTS_LIMIT;

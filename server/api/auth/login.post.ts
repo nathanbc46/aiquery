@@ -2,6 +2,8 @@ import { eq, and } from 'drizzle-orm';
 import bcrypt from 'bcryptjs';
 import { v4 as uuidv4 } from 'uuid';
 import { users, vtigerUsers } from '../../utils/schema';
+import { getSessionPassword } from '../../utils/auth';
+import { checkLoginRateLimit, clearLoginRateLimit } from '../../utils/rateLimit';
 
 export default defineEventHandler(async (event) => {
   const body = await readBody(event);
@@ -13,6 +15,8 @@ export default defineEventHandler(async (event) => {
       message: 'กรุณากรอกชื่อผู้ใช้และรหัสผ่าน',
     });
   }
+
+  checkLoginRateLimit(event);
 
   const db = await useDb();
 
@@ -43,8 +47,7 @@ export default defineEventHandler(async (event) => {
     } else if (storedHash.startsWith('$1$')) {
       // --- แบบเก่า: MD5-Crypt (Vtiger 5.4) ---
       const md5CryptModule = await import('apache-md5');
-      // @ts-ignore
-      const md5Crypt = md5CryptModule.default || md5CryptModule;
+      const md5Crypt = ((md5CryptModule as any).default ?? md5CryptModule) as (password: string, salt: string) => string;
       const hashedAttempt = md5Crypt(password, storedHash);
       isPasswordCorrect = (hashedAttempt === storedHash);
     } else {
@@ -103,7 +106,7 @@ export default defineEventHandler(async (event) => {
 
     // 4. บันทึก Session (ใช้ระบบ Session ของ Nitro/Nuxt)
     const session = await useSession(event, {
-      password: process.env.SESSION_PASSWORD || 'a_very_long_and_secure_password_for_session_encryption',
+      password: getSessionPassword(),
       cookie: {
         maxAge: rememberMe ? 60 * 60 * 24 * 30 : undefined, // 30 วัน ถ้าติ๊ก Remember Me
         sameSite: 'lax',
@@ -119,6 +122,8 @@ export default defineEventHandler(async (event) => {
       role: aiUser.role,
       email: aiUser.email,
     });
+
+    clearLoginRateLimit(event);
 
     return {
       status: 'success',

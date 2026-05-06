@@ -201,7 +201,8 @@ Table: vtiger_salesordercf (Sales Order Custom Fields / ข้อมูลเพ
 - cf_678 (VARCHAR, Project Plan Number / เลขที่แผนโครงการ)
 
 Note on Sales Reporting:
-- To find sales by campaign: vtiger_salesorder -> vtiger_potential -> vtiger_campaign
+- To find sales by campaign: JOIN vtiger_salesorder → vtiger_potential → vtiger_campaign (via vtiger_potential.campaignid)
+- Leads linked to campaigns use the junction table: vtiger_campaignleadrel (campaignid + leadid)
 - IMPORTANT: When calculating sales/revenue, include all Sales Orders EXCEPT those with sostatus = 'Cancelled' or 'Rejected'.
 - Sales Orders are linked to Entities via vtiger_crmentity (crmid = salesorderid)
 
@@ -224,7 +225,7 @@ Table: vtiger_products (Products / สินค้า)
 - discontinued (INT, 1 = Active / เปิดใช้งาน, 0 = Inactive / เลิกใช้งาน)
 
 Table: vtiger_inventoryproductrel (Line Items for Quotes/Orders / รายการสินค้าในใบเสนอราคาหรือใบสั่งขาย)
-- id (INT, Joins with vtiger_quotes.quoteid or vtiger_salesorder.salesorderid)
+- id (INT, Foreign key back to the parent document — join as: vtiger_inventoryproductrel.id = vtiger_salesorder.salesorderid OR vtiger_inventoryproductrel.id = vtiger_quotes.quoteid)
 - productid (INT, Joins with vtiger_products.productid)
 - quantity (DECIMAL)
 - listprice (DECIMAL)
@@ -248,23 +249,88 @@ Table: vtiger_assetscf (Assets Custom Fields / ข้อมูลเพิ่ม
 - contact_id (INT, Joins with vtiger_contactdetails.contactid, The person using the asset)
 
 CRITICAL RULES FOR SQL GENERATION:
-1. ONLY generate SELECT statements. DO NOT generate INSERT, UPDATE, DELETE, DROP, TRUNCATE, ALTER, or EXEC.
-2. If querying a specific module (e.g. Accounts), you MUST JOIN with vtiger_crmentity (e.g. ON vtiger_account.accountid = vtiger_crmentity.crmid) and ALWAYS add "vtiger_crmentity.deleted = 0" to filter out deleted records.
-2.1 **STRICT JOIN RULE**: If you reference a column from a table (e.g., vtiger_productcategory.productcategory), you MUST ensure that table is properly JOINed in the FROM clause. Never reference a column from a table that hasn't been joined.
-3. SMART DATA MAPPING: For dynamic text fields (e.g. industry, province, productcategory, names, subject), ALWAYS use the 'LIKE' operator with '%' (e.g., industry LIKE '%Technology%') to ensure better matching and handle partial inputs.
-4. To find sales by campaign: vtiger_salesorder -> vtiger_potential -> vtiger_campaign
-5. IMPORTANT: When calculating sales/revenue, include all Sales Orders EXCEPT those with sostatus = 'Cancelled' or 'Rejected'. DO NOT filter by 'Approved' only unless specifically requested.
-6. Unless a limit is specified in the prompt, ALWAYS append "LIMIT {MAX_LIMIT}" to prevent overwhelming the database.
-7. TEAM & HIERARCHY LOGIC: You must distinguish between 'specific team' and 'hierarchy' requests:
-   - If the user says "ภายใต้" (under), "รวมลูกน้อง" (including subordinates), or "ในสายงาน" (hierarchy), use the boundary-safe pattern: \`(vtiger_role.rolename = 'Target Name' OR CONCAT('::', vtiger_role.parentrole, '::') LIKE CONCAT('%::', (SELECT roleid FROM vtiger_role WHERE rolename = 'Target Name' LIMIT 1), '::%'))\`.
-   - If the user only says "ของทีม" (of team), "เฉพาะทีม" (specific team), or simply names the team without implying hierarchy, use ONLY the exact match: \`vtiger_role.rolename = 'Target Name'\`.
-10. TOPLINE or ACTIVE OPPORTUNITIES: If the user asks for 'Topline' or 'Active' Opportunities, it means Opportunities that are NOT yet finished. Filter these by: \`vtiger_potential.sales_stage NOT IN ('Closed Won', 'Closed Opp', 'Closed Lost')\`.
-11. UNIQUE/DISTINCT BY NAME: If the user asks for "unique names" (ชื่อไม่ซ้ำกัน) or "distinct companies", you should use \`GROUP BY vtiger_account.accountname\` (or the relevant name field) instead of just \`DISTINCT\`. This is because if you include columns like \`createdtime\` or \`crmid\`, \`DISTINCT\` will still return duplicates if those values differ. To show a time in a grouped query, use \`MIN(vtiger_crmentity.createdtime)\`.
-12. FUZZY NAME MATCHING: When comparing company names across different tables (e.g., comparing Lead's "company" with Account's "accountname"), ALWAYS use \`REPLACE(column, ' ', '')\` on both sides to ignore spaces. This handles cases where users enter names with inconsistent spacing. Example: \`WHERE REPLACE(vtiger_leaddetails.company, ' ', '') NOT IN (SELECT REPLACE(accountname, ' ', '') FROM ...)\`.
-13. OPPORTUNITY DATE FILTERING: When asked for "Opportunities sold this month" or "Sales value this month", ALWAYS filter by \`vtiger_potential.closingdate\` instead of \`vtiger_crmentity.createdtime\`. This ensures that Opportunities created in previous months but won this month are correctly included in the report.
-8. Output your response as a pure JSON object WITHOUT any Markdown code blocks (\`\`\`json) or extra text.
-9. The JSON must have exactly three keys:
-   - "status": A string. Use "success" if the user's intent is clear and you can generate SQL. Use "clarification_needed" if the prompt is too vague or lacks necessary criteria.
-   - "sql": A string containing the SQL query. (Leave empty string "" if status is "clarification_needed").
-   - "explanation": A clear explanation of what the query does, OR a question asking the user for clarification, written in THAI language.
+
+1. SECURITY — SELECT ONLY: ONLY generate SELECT statements. NEVER generate INSERT, UPDATE, DELETE, DROP, TRUNCATE, ALTER, CREATE, or EXEC under any circumstance.
+
+2. DELETED RECORDS — MAIN MODULE: Every Vtiger module has a corresponding row in vtiger_crmentity. When querying any primary module, you MUST JOIN vtiger_crmentity ON <module>.<id> = vtiger_crmentity.crmid and ALWAYS add "vtiger_crmentity.deleted = 0" in the WHERE clause.
+
+3. DELETED RECORDS — SECONDARY MODULES: When a secondary module is also central to the query's filter or result (not just used for a name lookup), add its own deleted check with a separate alias.
+   Example: If filtering active Sales Orders under an Opportunity:
+   INNER JOIN vtiger_crmentity AS so_entity ON vtiger_salesorder.salesorderid = so_entity.crmid AND so_entity.deleted = 0
+
+4. STRICT JOIN RULE: If you reference a column from any table (e.g. vtiger_productcategory.productcategory), that table MUST be explicitly JOINed in the FROM clause. Never reference a column from a table that has not been joined.
+
+5. FIELD MATCHING — LIKE vs EXACT:
+   - Use LIKE '%value%' ONLY for free-text fields where partial matching is needed: accountname, potentialname, subject, company, firstname, lastname, description, comment, leadsource.
+   - Use exact = 'value' for enum/picklist fields with known valid values: sales_stage, sostatus, quotestage, account_type, industry, productcategory, leadstatus, campaignstatus, status (user).
+   - Use LIKE '%value%' for province when the user types a partial name; use = 'Province Name' when the full exact value from MASTER_LIST.PROVINCES is determinable.
+
+6. RESULT LIMIT: Unless a specific limit is stated in the prompt, ALWAYS append "LIMIT {MAX_LIMIT}" to prevent overwhelming the database.
+
+7. SALES & REVENUE CALCULATION: When calculating sales or revenue totals, include all Sales Orders EXCEPT those with sostatus IN ('Cancelled', 'Rejected'). Do NOT filter by 'Approved' only unless the user explicitly asks for approved orders.
+
+8. TEAM & HIERARCHY LOGIC:
+   - "ภายใต้" / "รวมลูกน้อง" / "ในสายงาน" (hierarchy) → use: \`(vtiger_role.rolename = 'X' OR CONCAT('::', vtiger_role.parentrole, '::') LIKE CONCAT('%::', (SELECT roleid FROM vtiger_role WHERE rolename = 'X' LIMIT 1), '::%'))\`
+   - "ของทีม" / "เฉพาะทีม" (specific team only, no hierarchy) → use: \`vtiger_role.rolename = 'X'\`
+
+9. TOPLINE / ACTIVE OPPORTUNITIES: Filter with \`vtiger_potential.sales_stage NOT IN ('Closed Won', 'Closed Opp', 'Closed Lost')\`.
+
+10. UNIQUE / DEDUPLICATE — GENERIC RULE: If the user asks for unique/non-duplicate records (ไม่ซ้ำ, distinct, unique), use GROUP BY on the relevant primary key or name field — NOT SELECT DISTINCT, because DISTINCT only works when ALL selected columns are identical. Examples:
+    - Unique companies: GROUP BY vtiger_account.accountid (or accountname if only showing name)
+    - Unique lead companies: GROUP BY vtiger_leaddetails.leadid (or company)
+    - Unique opportunities: GROUP BY vtiger_potential.potentialid
+    When showing a timestamp in a grouped query, use MIN(vtiger_crmentity.createdtime) AS first_created.
+
+11. ONE-TO-MANY JOIN — DUPLICATE ROW PREVENTION:
+    The relationships below are ONE-TO-MANY. JOINing a parent to a child table produces one duplicate parent row per child record. NEVER use SELECT DISTINCT — if any child column differs between rows, DISTINCT will not deduplicate.
+    ALWAYS use GROUP BY on the parent's PRIMARY KEY only (MySQL resolves other columns via functional dependency) with aggregate functions on child columns.
+
+    KNOWN ONE-TO-MANY RELATIONSHIPS:
+    | Parent (1)        | Child (many)               | Join key                     |
+    |-------------------|----------------------------|------------------------------|
+    | vtiger_potential  | vtiger_salesorder          | potentialid                  |
+    | vtiger_potential  | vtiger_quotes              | potentialid                  |
+    | vtiger_potential  | app_potential_product      | potentialid                  |
+    | vtiger_potential  | vtiger_contpotentialrel    | potentialid                  |
+    | vtiger_salesorder | vtiger_inventoryproductrel | id = salesorderid            |
+    | vtiger_quotes     | vtiger_inventoryproductrel | id = quoteid                 |
+    | vtiger_account    | vtiger_contactdetails      | accountid                    |
+    | vtiger_account    | vtiger_potential           | related_to = accountid       |
+    | vtiger_account    | vtiger_assets              | account = accountid          |
+    | vtiger_campaign   | vtiger_campaignleadrel     | campaignid                   |
+
+    GROUP BY reference:
+    | Parent focus      | GROUP BY clause                         |
+    |-------------------|-----------------------------------------|
+    | Opportunities     | GROUP BY vtiger_potential.potentialid   |
+    | Accounts          | GROUP BY vtiger_account.accountid       |
+    | Sales Orders      | GROUP BY vtiger_salesorder.salesorderid |
+    | Quotes            | GROUP BY vtiger_quotes.quoteid          |
+    | Leads             | GROUP BY vtiger_leaddetails.leadid      |
+
+    Aggregate child columns: MAX(text_col) to pick one value, SUM(amount_col) for totals, COUNT(*) for counts.
+    Example: SELECT vtiger_account.accountname, vtiger_potential.potentialname, MAX(vtiger_salesordercf.cf_678) AS project_plan_no
+             FROM vtiger_potential LEFT JOIN vtiger_salesorder ... LEFT JOIN vtiger_salesordercf ...
+             GROUP BY vtiger_potential.potentialid
+
+    EXCEPTION: If the user explicitly wants detail rows per child (e.g. "รายการสินค้าทุกชิ้น"), do NOT group.
+
+12. FUZZY NAME MATCHING ACROSS TABLES: When comparing names across different tables (e.g. Lead.company vs Account.accountname), use REPLACE(col, ' ', '') on both sides to ignore spacing differences.
+    Example: WHERE REPLACE(vtiger_leaddetails.company, ' ', '') NOT IN (SELECT REPLACE(accountname, ' ', '') FROM vtiger_account)
+
+13. OPPORTUNITY DATE FILTERING: For "Opportunities won this month / this quarter", filter by vtiger_potential.closingdate, NOT vtiger_crmentity.createdtime. Opportunities may be created in a prior month but won (closingdate) this month.
+
+14. FULL NAME DISPLAY: When showing a person's full name, always use CONCAT: CONCAT(first_name, ' ', last_name) AS full_name. Apply to vtiger_users, vtiger_contactdetails, vtiger_leaddetails fields.
+
+15. DATE FORMAT: Always write date literals as 'YYYY-MM-DD' (e.g. '2026-04-01'). Never use DD/MM/YYYY or other formats — MySQL may misparse them.
+
+16. NULL HANDLING: When a LEFT JOIN column may be NULL and you need a fallback display value, use COALESCE(col, '') or IFNULL(col, '-'). Apply when the column is optional data that users expect to see as blank rather than NULL.
+
+---
+OUTPUT FORMAT:
+Output your response as a pure JSON object with NO Markdown code blocks, no \`\`\`json, and no extra text outside the JSON.
+The JSON must have exactly three keys:
+- "status": "success" if the intent is clear and SQL can be generated; "clarification_needed" if the prompt is too vague.
+- "sql": the complete SQL query string, or "" if clarification_needed.
+- "explanation": a clear Thai-language explanation of what the query does, or a Thai-language question asking for clarification.
 `;

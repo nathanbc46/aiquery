@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { 
   Sparkles, 
   Search, 
@@ -27,7 +27,9 @@ import {
   Eye,
   EyeOff,
   Loader2,
-  LayoutGrid
+  LayoutGrid,
+  Maximize2,
+  Minimize2
 } from 'lucide-vue-next'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
@@ -449,48 +451,55 @@ const reportError = async () => {
 const isEditingSql = ref(false)
 const editedSql = ref('')
 const isUpdatingSql = ref(false)
+const isSqlModalFullscreen = ref(false)
+const sqlModalError = ref('')
+
+watch(isSqlModalOpen, (open) => {
+  if (!open) {
+    isSqlModalFullscreen.value = false
+    sqlModalError.value = ''
+    isEditingSql.value = false
+  }
+})
 
 const startEditingSql = () => {
-  // จัดรูปแบบ SQL ก่อนนำไปแสดงในกล่องแก้ไขเพื่อให้ Admin อ่านง่าย
   editedSql.value = formatSql(generatedResult.value?.sql || '')
   isEditingSql.value = true
+  sqlModalError.value = ''
 }
 
 const cancelEditingSql = () => {
   isEditingSql.value = false
+  sqlModalError.value = ''
 }
 
 const updateSql = async () => {
   if (!editedSql.value || isUpdatingSql.value) return
-  
+
   isUpdatingSql.value = true
+  sqlModalError.value = ''
   try {
     const response = await $fetch<any>('/api/ai-query/preview', {
       method: 'POST',
       body: { query: editedSql.value }
     })
-    
+
     if (response.success) {
-      // อัปเดตข้อมูลใน Dashboard หลัก
       generatedResult.value.sql = editedSql.value
       generatedResult.value.previewData = response.data
       generatedResult.value.previewCount = response.totalCount
-      
-      // ล้างสถานะ Error เดิม (ถ้ามี) และเปลี่ยนเป็น Success
       generatedResult.value.status = 'success'
       generatedResult.value.dbError = null
-      
-      // เปิด Preview อัตโนมัติเมื่อมีการอัปเดต SQL (สำหรับ Admin/Manager)
       showPreview.value = true
-      
+
       toast.success('อัปเดตสำเร็จ', 'ระบบอัปเดตข้อมูลตามคำสั่ง SQL ใหม่ของคุณเรียบร้อยแล้ว')
       isEditingSql.value = false
       isSqlModalOpen.value = false
     } else {
-      toast.error('SQL ไม่ถูกต้อง', response.error)
+      sqlModalError.value = response.error || 'SQL ไม่ถูกต้อง'
     }
   } catch (e: any) {
-    toast.error('ล้มเหลว', 'ไม่สามารถรันคำสั่ง SQL นี้ได้')
+    sqlModalError.value = e?.data?.message || e?.message || 'ไม่สามารถรันคำสั่ง SQL นี้ได้'
   } finally {
     isUpdatingSql.value = false
   }
@@ -1396,9 +1405,19 @@ const highlightSql = (sqlStr: string) => {
     <ClientOnly>
       <Teleport to="body">
         <transition name="modal">
-          <div v-if="isSqlModalOpen" class="fixed inset-0 z-[110] flex items-center justify-center p-6 bg-slate-900/80 backdrop-blur-md" @click="isSqlModalOpen = false">
-            <div class="bg-white dark:bg-slate-900 rounded-[2rem] shadow-2xl w-full max-w-4xl overflow-hidden border border-slate-200 dark:border-slate-800 animate-in zoom-in-95 duration-300" @click.stop>
-              <div class="px-8 py-6 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center bg-slate-50 dark:bg-slate-950/50">
+          <div
+            v-if="isSqlModalOpen"
+            class="fixed inset-0 z-[110] flex items-center justify-center bg-slate-900/80 backdrop-blur-md"
+            :class="isSqlModalFullscreen ? '' : 'p-6'"
+            @click="!isSqlModalFullscreen && (isSqlModalOpen = false)"
+          >
+            <div
+              class="bg-white dark:bg-slate-900 shadow-2xl w-full overflow-hidden border border-slate-200 dark:border-slate-800 animate-in zoom-in-95 duration-300 flex flex-col"
+              :class="isSqlModalFullscreen ? 'h-full rounded-none max-w-none' : 'rounded-[2rem] max-w-4xl'"
+              @click.stop
+            >
+              <!-- Header -->
+              <div class="px-8 py-6 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center bg-slate-50 dark:bg-slate-950/50 shrink-0">
                 <div class="flex items-center gap-3">
                   <div class="w-10 h-10 rounded-xl bg-blue-500/10 flex items-center justify-center text-blue-600 dark:text-blue-400">
                     <Terminal class="w-6 h-6" />
@@ -1408,8 +1427,8 @@ const highlightSql = (sqlStr: string) => {
                     <p class="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">ชุดคำสั่งที่ใช้ในการดึงข้อมูลจาก Database</p>
                   </div>
                 </div>
-                <div class="flex items-center gap-4">
-                  <button 
+                <div class="flex items-center gap-2">
+                  <button
                     v-if="isAdmin && !isEditingSql"
                     @click="startEditingSql"
                     class="flex items-center gap-2 px-4 py-2 rounded-xl bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 hover:bg-amber-500 hover:text-white transition-all active:scale-95 text-xs font-bold"
@@ -1417,44 +1436,67 @@ const highlightSql = (sqlStr: string) => {
                     <Edit3 class="w-4 h-4" />
                     แก้ไข SQL
                   </button>
-                  <button 
-                    @click="copySql"
+                  <button
                     v-if="!isEditingSql"
+                    @click="copySql"
                     class="flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-blue-600 hover:text-white transition-all active:scale-95 text-xs font-bold"
                   >
                     <Copy class="w-4 h-4" />
                     {{ isCopied ? 'คัดลอกแล้ว' : 'คัดลอก SQL' }}
+                  </button>
+                  <button
+                    @click="isSqlModalFullscreen = !isSqlModalFullscreen"
+                    class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors p-2 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800"
+                    :title="isSqlModalFullscreen ? 'ย่อขนาด' : 'ขยายเต็มจอ'"
+                  >
+                    <Maximize2 v-if="!isSqlModalFullscreen" class="w-5 h-5" />
+                    <Minimize2 v-else class="w-5 h-5" />
                   </button>
                   <button @click="isSqlModalOpen = false" class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors p-2 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800">
                     <X class="w-6 h-6" />
                   </button>
                 </div>
               </div>
-              
-              <div class="p-8">
-                <div v-if="!isEditingSql" class="bg-slate-50 dark:bg-slate-950/50 rounded-2xl p-8 border border-slate-100 dark:border-slate-800 shadow-inner overflow-x-auto max-h-[500px] custom-scrollbar">
+
+              <!-- Content -->
+              <div class="p-8 flex flex-col flex-1 overflow-auto gap-6">
+                <!-- View mode -->
+                <div
+                  v-if="!isEditingSql"
+                  class="bg-slate-50 dark:bg-slate-950/50 rounded-2xl p-8 border border-slate-100 dark:border-slate-800 shadow-inner overflow-auto custom-scrollbar flex-1"
+                >
                   <pre class="text-sm font-mono leading-relaxed whitespace-pre-wrap"><code class="sql-highlight" v-html="highlightSql(generatedResult?.sql)"></code></pre>
                 </div>
-                
-                <div v-else class="space-y-6">
-                  <div class="relative group">
-                    <textarea 
+
+                <!-- Edit mode -->
+                <template v-else>
+                  <div class="relative group flex-1 flex flex-col">
+                    <textarea
                       v-model="editedSql"
-                      rows="12"
-                      class="w-full bg-slate-50 dark:bg-slate-950/50 rounded-2xl p-8 border border-slate-200 dark:border-slate-800 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all font-mono text-sm leading-relaxed outline-none resize-none custom-scrollbar"
+                      class="flex-1 w-full bg-slate-50 dark:bg-slate-950/50 rounded-2xl p-8 border border-slate-200 dark:border-slate-800 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all font-mono text-sm leading-relaxed outline-none resize-none custom-scrollbar"
+                      :style="isSqlModalFullscreen ? 'min-height: 0' : 'min-height: 260px'"
                       placeholder="แก้ไขคำสั่ง SQL ที่นี่..."
                     ></textarea>
                     <div class="absolute top-4 right-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest bg-white/80 dark:bg-slate-900/80 px-2 py-1 rounded-md border border-slate-200 dark:border-slate-800 opacity-0 group-hover:opacity-100 transition-opacity">SQL Editor Mode</div>
                   </div>
-                  
-                  <div class="flex items-center justify-end gap-4">
-                    <button 
+
+                  <!-- Error block -->
+                  <div v-if="sqlModalError" class="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/50 rounded-2xl flex items-start gap-3 shrink-0">
+                    <AlertCircle class="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
+                    <div class="min-w-0">
+                      <p class="text-sm font-bold text-red-700 dark:text-red-400">SQL Error</p>
+                      <p class="text-xs text-red-600 dark:text-red-400 mt-1 font-mono break-all">{{ sqlModalError }}</p>
+                    </div>
+                  </div>
+
+                  <div class="flex items-center justify-end gap-4 shrink-0">
+                    <button
                       @click="cancelEditingSql"
                       class="px-8 py-3 rounded-2xl border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all font-bold text-sm"
                     >
                       ยกเลิก
                     </button>
-                    <button 
+                    <button
                       @click="updateSql"
                       :disabled="isUpdatingSql || !editedSql"
                       class="px-10 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-black rounded-2xl hover:scale-105 transition-all active:scale-95 flex items-center gap-3 disabled:opacity-50 disabled:scale-100 shadow-lg shadow-blue-500/20"
@@ -1464,9 +1506,10 @@ const highlightSql = (sqlStr: string) => {
                       ตกลง และ Query ใหม่
                     </button>
                   </div>
-                </div>
-                
-                <div class="mt-6 p-4 bg-emerald-50 dark:bg-emerald-900/10 border border-emerald-100 dark:border-emerald-900/30 rounded-2xl flex items-center gap-3">
+                </template>
+
+                <!-- Security badge -->
+                <div class="p-4 bg-emerald-50 dark:bg-emerald-900/10 border border-emerald-100 dark:border-emerald-900/30 rounded-2xl flex items-center gap-3 shrink-0">
                   <ShieldCheck class="w-5 h-5 text-emerald-500" />
                   <span class="text-xs font-medium text-emerald-700 dark:text-emerald-400">คำสั่งนี้ผ่านการตรวจสอบความปลอดภัยและอนุญาตให้ใช้งานแบบ Read-only เท่านั้น</span>
                 </div>

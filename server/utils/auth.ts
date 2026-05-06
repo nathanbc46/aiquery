@@ -1,13 +1,18 @@
 import type { H3Event } from 'h3';
 
-/**
- * ดึงข้อมูล Session ของผู้ใช้ที่ล็อกอินอยู่
- */
+export const getSessionPassword = () => {
+  const password = process.env.SESSION_PASSWORD;
+  if (!password) {
+    throw createError({ statusCode: 500, message: 'SESSION_PASSWORD environment variable is not configured' });
+  }
+  return password;
+};
+
 export const getAuthSession = async (event: H3Event) => {
   const session = await useSession(event, {
-    password: process.env.SESSION_PASSWORD || 'a_very_long_and_secure_password_for_session_encryption',
+    password: getSessionPassword(),
   });
-  
+
   return session.data;
 };
 
