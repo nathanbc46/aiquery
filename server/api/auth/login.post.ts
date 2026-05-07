@@ -110,7 +110,7 @@ export default defineEventHandler(async (event) => {
       cookie: {
         maxAge: rememberMe ? 60 * 60 * 24 * 30 : undefined, // 30 วัน ถ้าติ๊ก Remember Me
         sameSite: 'lax',
-        secure: process.env.NODE_ENV === 'production'
+        secure: process.env.COOKIE_SECURE === 'true'
       }
     });
 
