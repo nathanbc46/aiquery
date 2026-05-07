@@ -6,7 +6,7 @@ import { or, eq } from 'drizzle-orm';
 
 export default defineEventHandler(async (event) => {
   const body = await readBody(event);
-  const { queryText, generatedSql, explanation, resultCount, requestReason } = body;
+  const { queryText, generatedSql, explanation, resultCount, requestReason, ownerDisplayName } = body;
 
   if (!queryText || !generatedSql) {
     throw createError({ statusCode: 400, statusMessage: 'Missing required fields' });
@@ -32,6 +32,7 @@ export default defineEventHandler(async (event) => {
       explanationTh: explanation,
       resultCount: resultCount || 0,
       requestReason: requestReason,
+      ownerDisplayName: ownerDisplayName || null,
       status: 'PENDING',
     });
 

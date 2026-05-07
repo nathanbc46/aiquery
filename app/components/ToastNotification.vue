@@ -18,10 +18,10 @@ const getIcon = (type: string) => {
 
 const getColorClass = (type: string) => {
   switch (type) {
-    case 'success': return 'text-emerald-500 bg-emerald-50'
-    case 'error': return 'text-rose-500 bg-rose-50'
-    case 'warning': return 'text-amber-500 bg-amber-50'
-    default: return 'text-blue-500 bg-blue-50'
+    case 'success': return 'text-emerald-500 bg-emerald-50 dark:bg-emerald-500/10'
+    case 'error': return 'text-rose-500 bg-rose-50 dark:bg-rose-500/10'
+    case 'warning': return 'text-amber-500 bg-amber-50 dark:bg-amber-500/10'
+    default: return 'text-blue-500 bg-blue-50 dark:bg-blue-500/10'
   }
 }
 </script>
@@ -39,7 +39,7 @@ const getColorClass = (type: string) => {
       <div 
         v-for="toast in toasts" 
         :key="toast.id" 
-        class="pointer-events-auto w-full max-w-sm overflow-hidden rounded-xl bg-white shadow-lg ring-1 ring-black/5"
+        class="pointer-events-auto w-full max-w-sm overflow-hidden rounded-xl bg-white dark:bg-slate-800 shadow-lg ring-1 ring-black/5 dark:ring-white/10"
       >
         <div class="p-4">
           <div class="flex items-start">
@@ -51,13 +51,13 @@ const getColorClass = (type: string) => {
               </div>
             </div>
             <div class="ml-3 w-0 flex-1 pt-0.5">
-              <p class="text-sm font-semibold text-slate-900">{{ toast.title }}</p>
-              <p v-if="toast.message" class="mt-1 text-sm text-slate-500 leading-relaxed">{{ toast.message }}</p>
+              <p class="text-sm font-semibold text-slate-900 dark:text-slate-100">{{ toast.title }}</p>
+              <p v-if="toast.message" class="mt-1 text-sm text-slate-500 dark:text-slate-400 leading-relaxed">{{ toast.message }}</p>
             </div>
             <div class="ml-4 flex flex-shrink-0">
               <button 
                 @click="remove(toast.id)" 
-                class="inline-flex rounded-md bg-white text-slate-400 hover:text-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-500 focus:ring-offset-2"
+                class="inline-flex rounded-md bg-white dark:bg-slate-800 text-slate-400 hover:text-slate-500 dark:hover:text-slate-300 focus:outline-none focus:ring-2 focus:ring-slate-500 focus:ring-offset-2 dark:focus:ring-offset-slate-800"
               >
                 <span class="sr-only">Close</span>
                 <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">

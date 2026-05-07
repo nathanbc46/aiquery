@@ -73,6 +73,7 @@ export default defineEventHandler(async (event) => {
         return {
           id: req.id,
           user: row.userName || 'Unknown User',
+          ownerDisplayName: req.ownerDisplayName || null,
           query: req.queryText,
           sql: req.generatedSql,
           explanation: req.explanationTh,

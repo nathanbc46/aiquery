@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, watch, computed } from 'vue'
 import { 
   Sparkles, 
   Search, 
@@ -84,6 +84,81 @@ const favoriteTitle = ref('')
 
 // CSV download confirmation modal
 const isCsvConfirmModalOpen = ref(false)
+const csvFilename = ref('')
+
+const openCsvModal = () => {
+  const today = new Date().toISOString().slice(0, 10).replace(/-/g, '')
+  csvFilename.value = `AI_Export_${today}`
+  fetchVtigerUsers().then(() => {
+    if (!csvOwnerVtigerId.value && user.value?.vtigerId) {
+      csvOwnerVtigerId.value = user.value.vtigerId
+      csvOwnerSearch.value = getOwnerLabel(user.value.vtigerId)
+    }
+  })
+  isCsvConfirmModalOpen.value = true
+}
+
+const openZohoModal = () => {
+  fetchVtigerUsers().then(() => {
+    if (!zohoOwnerVtigerId.value && user.value?.vtigerId) {
+      zohoOwnerVtigerId.value = user.value.vtigerId
+      zohoOwnerSearch.value = getOwnerLabel(user.value.vtigerId)
+    }
+  })
+  isZohoModalOpen.value = true
+}
+
+// User Owner state (for CSV & Zoho modals)
+interface VtigerUser { id: number; firstName: string | null; lastName: string | null; userName: string; email1: string | null }
+const vtigerUsersList = ref<VtigerUser[]>([])
+const vtigerUsersLoaded = ref(false)
+const csvOwnerVtigerId = ref<number | null>(null)
+const csvOwnerSearch = ref('')
+const showCsvOwnerDropdown = ref(false)
+const zohoOwnerVtigerId = ref<number | null>(null)
+const zohoOwnerSearch = ref('')
+const showZohoOwnerDropdown = ref(false)
+
+const getOwnerLabel = (vtigerId: number | null): string => {
+  if (!vtigerId) return ''
+  const u = vtigerUsersList.value.find(u => u.id === vtigerId)
+  if (!u) return String(vtigerId)
+  return [u.firstName, u.lastName].filter(Boolean).join(' ') || u.userName
+}
+
+const filterUsers = (search: string): VtigerUser[] => {
+  const q = search.toLowerCase()
+  return vtigerUsersList.value.filter(u =>
+    [u.firstName, u.lastName, u.userName, u.email1].some(v => v?.toLowerCase().includes(q))
+  )
+}
+
+const filteredCsvUsers = computed(() => filterUsers(csvOwnerSearch.value))
+const filteredZohoUsers = computed(() => filterUsers(zohoOwnerSearch.value))
+
+const fetchVtigerUsers = async () => {
+  if (vtigerUsersLoaded.value) return
+  try {
+    const data = await $fetch<{ users: VtigerUser[] }>('/api/ai-query/vtiger-users')
+    vtigerUsersList.value = data.users
+    vtigerUsersLoaded.value = true
+  } catch { /* fallback: empty list */ }
+}
+
+const selectCsvOwner = (u: VtigerUser) => {
+  csvOwnerVtigerId.value = u.id
+  csvOwnerSearch.value = getOwnerLabel(u.id)
+  showCsvOwnerDropdown.value = false
+}
+
+const selectZohoOwner = (u: VtigerUser) => {
+  zohoOwnerVtigerId.value = u.id
+  zohoOwnerSearch.value = getOwnerLabel(u.id)
+  showZohoOwnerDropdown.value = false
+}
+
+const hideCsvOwnerDropdown = () => { setTimeout(() => { showCsvOwnerDropdown.value = false }, 150) }
+const hideZohoOwnerDropdown = () => { setTimeout(() => { showZohoOwnerDropdown.value = false }, 150) }
 
 // Delete confirmation state
 const isDeleteConfirmModalOpen = ref(false)
@@ -211,6 +286,11 @@ const renderedDataGuide = computed(() => {
 const handleZohoExport = async () => {
   isExportingZoho.value = true
   try {
+    // Set default owner if not yet selected
+    if (!zohoOwnerVtigerId.value && user.value?.vtigerId) {
+      zohoOwnerVtigerId.value = user.value.vtigerId
+    }
+
     // 1. Create request + auto-approve (same as CSV flow)
     const requestResp = await $fetch<any>('/api/ai-query/request', {
       method: 'POST',
@@ -219,7 +299,8 @@ const handleZohoExport = async () => {
         generatedSql: generatedResult.value.sql,
         explanation: generatedResult.value.explanation,
         resultCount: generatedResult.value.previewCount,
-        requestReason: 'Export to Zoho WorkDrive'
+        requestReason: 'Export to Zoho WorkDrive',
+        ownerDisplayName: zohoOwnerVtigerId.value ? getOwnerLabel(zohoOwnerVtigerId.value) : null
       }
     })
 
@@ -233,7 +314,7 @@ const handleZohoExport = async () => {
       method: 'POST',
       body: {
         sql: generatedResult.value.sql,
-        options: zohoOptions.value,
+        options: { ...zohoOptions.value, ownerVtigerId: zohoOwnerVtigerId.value },
         requestId: requestResp.requestId
       }
     })
@@ -376,9 +457,9 @@ const generateSql = async () => {
   }
 }
 
-const requestApproval = async () => {
+const requestApproval = async (ownerDisplayName?: string) => {
   if (!generatedResult.value) return
-  
+
   isRequesting.value = true
   try {
     const response = await $fetch<any>('/api/ai-query/request', {
@@ -388,7 +469,8 @@ const requestApproval = async () => {
         generatedSql: generatedResult.value.sql,
         explanation: generatedResult.value.explanation,
         resultCount: generatedResult.value.previewCount,
-        requestReason: requestReason.value
+        requestReason: requestReason.value,
+        ownerDisplayName: ownerDisplayName || null
       }
     })
     
@@ -398,7 +480,9 @@ const requestApproval = async () => {
         
         // ถ้าเป็น Admin ให้เริ่มดาวน์โหลดไฟล์ทันที (ใช้ window.location เพื่อไม่ให้เปิด Tab ใหม่)
         if (isAdmin.value && response.requestId) {
-          window.location.href = `/api/ai-query/export?id=${response.requestId}`
+          const fn = (csvFilename.value || 'AI_Export').replace(/[^a-zA-Z0-9ก-๙\s_-]/g, '').trim().replace(/\s+/g, '_') || 'AI_Export'
+          const ownerParam = csvOwnerVtigerId.value ? `&ownerVtigerId=${csvOwnerVtigerId.value}` : ''
+          window.location.href = `/api/ai-query/export?id=${response.requestId}&filename=${encodeURIComponent(fn)}${ownerParam}`
         }
       } else {
         toast.success('ส่งคำขอสำเร็จ', 'ส่งคำขออนุมัติไปยังหัวหน้างานเรียบร้อยแล้ว!')
@@ -1026,15 +1110,15 @@ const highlightSql = (sqlStr: string) => {
               <div class="w-full sm:w-auto relative group/export">
                 <div v-if="isAdmin" class="flex items-stretch shadow-2xl shadow-emerald-500/30 rounded-[2rem] overflow-hidden">
                   <button
-                    @click="isCsvConfirmModalOpen = true"
+                    @click="openCsvModal"
                     :disabled="isRequesting || generatedResult.previewCount === 0"
                     class="flex-1 px-8 py-5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:grayscale text-white text-sm font-black transition-all flex items-center justify-center gap-3 active:scale-95 uppercase tracking-widest border-r border-emerald-500/50"
                   >
                     <Download class="w-5 h-5" />
                     <span>CSV</span>
                   </button>
-                  <button 
-                    @click="isZohoModalOpen = true"
+                  <button
+                    @click="openZohoModal"
                     :disabled="isRequesting || generatedResult.previewCount === 0"
                     class="px-6 py-5 bg-emerald-600 hover:bg-emerald-700 text-white transition-all flex items-center justify-center active:scale-95 border-l border-emerald-700/30 group/zoho"
                     title="Export to Zoho Sheet"
@@ -1413,7 +1497,7 @@ const highlightSql = (sqlStr: string) => {
           >
             <div
               class="bg-white dark:bg-slate-900 shadow-2xl w-full overflow-hidden border border-slate-200 dark:border-slate-800 animate-in zoom-in-95 duration-300 flex flex-col"
-              :class="isSqlModalFullscreen ? 'h-full rounded-none max-w-none' : 'rounded-[2rem] max-w-4xl'"
+              :class="isSqlModalFullscreen ? 'h-full rounded-none max-w-none' : 'rounded-[2rem] max-w-4xl max-h-[90vh]'"
               @click.stop
             >
               <!-- Header -->
@@ -1465,7 +1549,7 @@ const highlightSql = (sqlStr: string) => {
                   v-if="!isEditingSql"
                   class="bg-slate-50 dark:bg-slate-950/50 rounded-2xl p-8 border border-slate-100 dark:border-slate-800 shadow-inner overflow-auto custom-scrollbar flex-1"
                 >
-                  <pre class="text-sm font-mono leading-relaxed whitespace-pre-wrap"><code class="sql-highlight" v-html="highlightSql(generatedResult?.sql)"></code></pre>
+                  <pre class="text-sm font-mono leading-relaxed whitespace-pre-wrap text-slate-800 dark:text-slate-200"><code class="sql-highlight" v-html="highlightSql(generatedResult?.sql)"></code></pre>
                 </div>
 
                 <!-- Edit mode -->
@@ -1473,7 +1557,7 @@ const highlightSql = (sqlStr: string) => {
                   <div class="relative group flex-1 flex flex-col">
                     <textarea
                       v-model="editedSql"
-                      class="flex-1 w-full bg-slate-50 dark:bg-slate-950/50 rounded-2xl p-8 border border-slate-200 dark:border-slate-800 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all font-mono text-sm leading-relaxed outline-none resize-none custom-scrollbar"
+                      class="flex-1 w-full bg-slate-50 dark:bg-slate-950/50 rounded-2xl p-8 border border-slate-200 dark:border-slate-800 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all font-mono text-sm leading-relaxed outline-none resize-none custom-scrollbar text-slate-800 dark:text-slate-200 placeholder:text-slate-400 dark:placeholder:text-slate-600"
                       :style="isSqlModalFullscreen ? 'min-height: 0' : 'min-height: 260px'"
                       placeholder="แก้ไขคำสั่ง SQL ที่นี่..."
                     ></textarea>
@@ -1612,6 +1696,44 @@ const highlightSql = (sqlStr: string) => {
                   <p class="text-[11px] text-slate-400 dark:text-white/30 mt-1.5">ไฟล์จะถูกบันทึกเป็น <span class="font-mono">{{ (zohoOptions.linkName || 'AI_Export').replace(/[^a-zA-Z0-9ก-๙]/g, '_') }}_[timestamp].xlsx</span></p>
                 </div>
 
+                <!-- User Owner -->
+                <div>
+                  <label class="text-xs font-bold text-slate-500 dark:text-white/40 uppercase tracking-widest mb-2 block">เจ้าของไฟล์ (User Owner)</label>
+                  <div class="relative" @click="fetchVtigerUsers()">
+                    <input
+                      v-model="zohoOwnerSearch"
+                      type="text"
+                      placeholder="ค้นหาชื่อผู้ใช้..."
+                      @focus="showZohoOwnerDropdown = true"
+                      @blur="hideZohoOwnerDropdown"
+                      @input="zohoOwnerVtigerId = null"
+                      class="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl px-4 py-3 pr-8 text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-white/20 outline-none focus:border-emerald-500/50 transition-all"
+                    />
+                    <button
+                      v-if="zohoOwnerVtigerId"
+                      @mousedown.prevent="zohoOwnerVtigerId = null; zohoOwnerSearch = ''"
+                      class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                    >
+                      <X class="w-4 h-4" />
+                    </button>
+                    <ul
+                      v-show="showZohoOwnerDropdown && filteredZohoUsers.length"
+                      class="absolute z-50 w-full mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-lg overflow-auto max-h-48"
+                    >
+                      <li
+                        v-for="u in filteredZohoUsers"
+                        :key="u.id"
+                        @mousedown.prevent="selectZohoOwner(u)"
+                        class="flex items-center justify-between gap-3 px-4 py-2.5 cursor-pointer hover:bg-emerald-50 dark:hover:bg-emerald-900/20 transition-colors"
+                        :class="zohoOwnerVtigerId === u.id ? 'bg-emerald-50 dark:bg-emerald-900/20' : ''"
+                      >
+                        <span class="text-sm font-medium text-slate-900 dark:text-slate-100">{{ [u.firstName, u.lastName].filter(Boolean).join(' ') || u.userName }}</span>
+                        <span class="text-[11px] text-slate-400 dark:text-slate-500 truncate">{{ u.email1 }}</span>
+                      </li>
+                    </ul>
+                  </div>
+                </div>
+
                 <!-- Info Box -->
                 <div class="bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-100 dark:border-emerald-500/20 rounded-xl p-4">
                   <ul class="space-y-2 text-xs text-emerald-700 dark:text-emerald-300/80 list-disc pl-4">
@@ -1624,15 +1746,15 @@ const highlightSql = (sqlStr: string) => {
 
               <!-- Footer -->
               <div class="p-6 flex items-center justify-end gap-3 bg-slate-50 dark:bg-white/[0.02]">
-                <button @click="isZohoModalOpen = false" class="px-6 py-2 text-xs font-bold text-slate-500 dark:text-white/50 hover:bg-slate-100 dark:hover:bg-white/5 rounded-lg transition-all border border-slate-200 dark:border-white/10">
+                <button @click="isZohoModalOpen = false" class="px-7 py-3.5 text-sm font-bold text-slate-500 dark:text-white/50 hover:bg-slate-100 dark:hover:bg-white/5 rounded-xl transition-all border border-slate-200 dark:border-white/10">
                   Cancel
                 </button>
-                <button 
+                <button
                   @click="handleZohoExport"
                   :disabled="isExportingZoho"
-                  class="px-8 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-xs font-bold text-white rounded-lg transition-all shadow-lg shadow-emerald-500/20 flex items-center gap-2"
+                  class="px-8 py-3.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-sm font-bold text-white rounded-xl transition-all shadow-lg shadow-emerald-500/20 flex items-center gap-2"
                 >
-                  <Loader2 v-if="isExportingZoho" class="w-3.5 h-3.5 animate-spin" />
+                  <Loader2 v-if="isExportingZoho" class="w-4 h-4 animate-spin" />
                   {{ isExportingZoho ? 'Creating...' : 'Create' }}
                 </button>
               </div>
@@ -1714,37 +1836,105 @@ const highlightSql = (sqlStr: string) => {
     <ClientOnly>
       <Teleport to="body">
         <transition name="modal">
-          <div v-if="isCsvConfirmModalOpen" class="fixed inset-0 z-[140] flex items-center justify-center p-6 bg-slate-900/80 backdrop-blur-md">
-            <div class="bg-white dark:bg-slate-900 rounded-[2.5rem] shadow-2xl w-full max-w-sm overflow-hidden border border-slate-200 dark:border-slate-800 animate-in zoom-in-95 duration-300" @click.stop>
-              <div class="p-8 text-center space-y-6">
-                <div class="w-20 h-20 bg-emerald-50 dark:bg-emerald-900/20 rounded-full flex items-center justify-center text-emerald-600 mx-auto border border-emerald-100 dark:border-emerald-800/50">
-                  <Download class="w-10 h-10" />
+          <div v-if="isCsvConfirmModalOpen" class="fixed inset-0 z-[140] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md">
+            <div class="bg-white dark:bg-[#1a1a1a] text-slate-900 dark:text-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden border border-slate-200 dark:border-white/10 flex flex-col animate-in zoom-in-95 duration-200" @click.stop>
+              <!-- Header -->
+              <div class="p-6 flex items-center justify-between border-b border-slate-100 dark:border-white/5">
+                <div class="flex items-center gap-3">
+                  <h3 class="text-xl font-bold tracking-tight">ดาวน์โหลดไฟล์ CSV</h3>
+                  <div class="flex items-center gap-1.5 px-2 py-0.5 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded text-[10px] font-bold border border-emerald-500/20 uppercase">
+                    <Download class="w-3 h-3" />
+                    CSV
+                  </div>
                 </div>
+                <button @click="isCsvConfirmModalOpen = false" class="p-2 hover:bg-slate-100 dark:hover:bg-white/5 rounded-full transition-colors text-slate-400 dark:text-white/50">
+                  <X class="w-5 h-5" />
+                </button>
+              </div>
 
-                <div class="space-y-2">
-                  <h3 class="text-xl font-black text-slate-900 dark:text-white">ยืนยันการดาวน์โหลด CSV</h3>
-                  <p class="text-sm text-slate-500 dark:text-slate-400 font-medium leading-relaxed">
-                    ระบบจะ<b class="text-slate-700 dark:text-slate-200">อนุมัติคำขอนี้อัตโนมัติ</b> บันทึกลงประวัติการใช้งาน และเริ่มดาวน์โหลดไฟล์ CSV ทันที
+              <!-- Content -->
+              <div class="p-8 space-y-6">
+                <!-- File Name Input -->
+                <div>
+                  <label class="text-xs font-bold text-slate-500 dark:text-white/40 uppercase tracking-widest mb-2 block">ชื่อไฟล์</label>
+                  <div class="flex items-stretch">
+                    <input
+                      v-model="csvFilename"
+                      type="text"
+                      placeholder="เช่น Sales_Report, Customer_List"
+                      @keyup.enter="isCsvConfirmModalOpen = false; requestApproval()"
+                      class="flex-1 bg-slate-50 dark:bg-white/5 border border-r-0 border-slate-200 dark:border-white/10 rounded-l-xl px-4 py-3 text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-white/20 outline-none focus:border-emerald-500/50 transition-all"
+                    />
+                    <span class="bg-slate-100 dark:bg-white/10 border border-l-0 border-slate-200 dark:border-white/10 rounded-r-xl px-4 py-3 text-sm text-slate-400 dark:text-white/30 font-mono flex items-center">.csv</span>
+                  </div>
+                  <p class="text-[11px] text-slate-400 dark:text-white/30 mt-1.5">
+                    ไฟล์จะถูกบันทึกเป็น <span class="font-mono">{{ ((csvFilename || 'AI_Export').replace(/[^a-zA-Z0-9ก-๙\s_-]/g, '').trim().replace(/\s+/g, '_') || 'AI_Export') + '.csv' }}</span>
                   </p>
                 </div>
 
-                <div class="flex gap-3 pt-2">
-                  <button
-                    @click="isCsvConfirmModalOpen = false"
-                    class="flex-1 py-4 text-xs font-black text-slate-400 hover:text-slate-900 dark:hover:text-white transition-all uppercase tracking-widest"
-                  >
-                    ยกเลิก
-                  </button>
-                  <button
-                    @click="isCsvConfirmModalOpen = false; requestApproval()"
-                    :disabled="isRequesting"
-                    class="flex-1 py-4 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-black rounded-2xl shadow-lg shadow-emerald-500/20 transition-all active:scale-95 uppercase tracking-widest flex items-center justify-center gap-2"
-                  >
-                    <RotateCcw v-if="isRequesting" class="w-4 h-4 animate-spin" />
-                    <Download v-else class="w-4 h-4" />
-                    <span>ยืนยัน / ดาวน์โหลด</span>
-                  </button>
+                <!-- User Owner -->
+                <div>
+                  <label class="text-xs font-bold text-slate-500 dark:text-white/40 uppercase tracking-widest mb-2 block">เจ้าของไฟล์ (User Owner)</label>
+                  <div class="relative" @click="fetchVtigerUsers()">
+                    <input
+                      v-model="csvOwnerSearch"
+                      type="text"
+                      placeholder="ค้นหาชื่อผู้ใช้..."
+                      @focus="showCsvOwnerDropdown = true"
+                      @blur="hideCsvOwnerDropdown"
+                      @input="csvOwnerVtigerId = null"
+                      class="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl px-4 py-3 pr-8 text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-white/20 outline-none focus:border-emerald-500/50 transition-all"
+                    />
+                    <button
+                      v-if="csvOwnerVtigerId"
+                      @mousedown.prevent="csvOwnerVtigerId = null; csvOwnerSearch = ''"
+                      class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                    >
+                      <X class="w-4 h-4" />
+                    </button>
+                    <ul
+                      v-show="showCsvOwnerDropdown && filteredCsvUsers.length"
+                      class="absolute z-50 w-full mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-lg overflow-auto max-h-48"
+                    >
+                      <li
+                        v-for="u in filteredCsvUsers"
+                        :key="u.id"
+                        @mousedown.prevent="selectCsvOwner(u)"
+                        class="flex items-center justify-between gap-3 px-4 py-2.5 cursor-pointer hover:bg-emerald-50 dark:hover:bg-emerald-900/20 transition-colors"
+                        :class="csvOwnerVtigerId === u.id ? 'bg-emerald-50 dark:bg-emerald-900/20' : ''"
+                      >
+                        <span class="text-sm font-medium text-slate-900 dark:text-slate-100">{{ [u.firstName, u.lastName].filter(Boolean).join(' ') || u.userName }}</span>
+                        <span class="text-[11px] text-slate-400 dark:text-slate-500 truncate">{{ u.email1 }}</span>
+                      </li>
+                    </ul>
+                  </div>
                 </div>
+
+                <!-- Info Box -->
+                <div class="bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-100 dark:border-emerald-500/20 rounded-xl p-4">
+                  <p class="text-xs text-emerald-700 dark:text-emerald-300/80 leading-relaxed">
+                    ระบบจะ<strong>อนุมัติคำขอนี้อัตโนมัติ</strong> บันทึกลงประวัติการใช้งาน และเริ่มดาวน์โหลดไฟล์ทันที
+                  </p>
+                </div>
+              </div>
+
+              <!-- Footer -->
+              <div class="p-6 flex items-center justify-end gap-3 bg-slate-50 dark:bg-white/[0.02]">
+                <button
+                  @click="isCsvConfirmModalOpen = false"
+                  class="px-7 py-3.5 text-sm font-bold text-slate-500 dark:text-white/50 hover:bg-slate-100 dark:hover:bg-white/5 rounded-xl transition-all border border-slate-200 dark:border-white/10"
+                >
+                  ยกเลิก
+                </button>
+                <button
+                  @click="isCsvConfirmModalOpen = false; requestApproval(csvOwnerVtigerId ? getOwnerLabel(csvOwnerVtigerId) : undefined)"
+                  :disabled="isRequesting"
+                  class="px-8 py-3.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-sm font-bold text-white rounded-xl transition-all shadow-lg shadow-emerald-500/20 flex items-center gap-2"
+                >
+                  <RotateCcw v-if="isRequesting" class="w-4 h-4 animate-spin" />
+                  <Download v-else class="w-4 h-4" />
+                  ยืนยัน / ดาวน์โหลด
+                </button>
               </div>
             </div>
           </div>

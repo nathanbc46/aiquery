@@ -1,9 +1,8 @@
 // https://nuxt.com/docs/api/configuration/nuxt-config
 export default defineNuxtConfig({
-  compatibilityDate: '2024-04-03',
-  future: {
-    compatibilityVersion: 4,
-  },
+  compatibilityDate: '2026-05-07',
+  // Nuxt 4 future features
+  future: { compatibilityVersion: 4 },
   modules: ['@nuxtjs/tailwindcss', '@pinia/nuxt', '@vite-pwa/nuxt', '@nuxtjs/color-mode'],
   css: ['~/assets/css/main.css'],
   colorMode: {
@@ -42,6 +41,16 @@ export default defineNuxtConfig({
     devOptions: {
       enabled: true,
       type: 'module'
+    }
+  },
+  vite: {
+    optimizeDeps: {
+      include: [
+        '@vue/devtools-core',
+        '@vue/devtools-kit',
+        'workbox-window',
+        'lucide-vue-next',
+      ]
     }
   },
   nitro: {

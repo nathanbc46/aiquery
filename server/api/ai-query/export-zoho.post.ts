@@ -3,7 +3,7 @@ import { sql } from 'drizzle-orm';
 import { eq } from 'drizzle-orm';
 import { getAuthSession } from '../../utils/auth';
 import { getValidZohoToken } from '../../utils/zoho';
-import { aiQueryRequests } from '../../utils/schema';
+import { aiQueryRequests, vtigerUsers } from '../../utils/schema';
 
 export default defineEventHandler(async (event) => {
   const session = await getAuthSession(event);
@@ -47,10 +47,25 @@ export default defineEventHandler(async (event) => {
       )
     ].join('\n');
 
-    // 4. Upload CSV to WorkDrive AI Queries folder
+    // 4. Resolve owner name if provided
+    let ownerSuffix = '';
+    if (options?.ownerVtigerId) {
+      const ownerRows = await db
+        .select({ firstName: vtigerUsers.firstName, lastName: vtigerUsers.lastName })
+        .from(vtigerUsers)
+        .where(eq(vtigerUsers.id, Number(options.ownerVtigerId)))
+        .limit(1);
+      if (ownerRows[0]) {
+        const o = ownerRows[0];
+        const name = [o.firstName, o.lastName].filter(Boolean).join('_') || '';
+        if (name) ownerSuffix = `_${name.replace(/[^a-zA-Z0-9ก-๙]/g, '_')}`;
+      }
+    }
+
+    // 5. Upload CSV to WorkDrive AI Queries folder
     const targetFolderId = process.env.ZOHO_FOLDER_ID || '32746828f57533b77410b951b061e7005d255';
     const safeName = (options?.linkName || 'AI_Export').replace(/[^a-zA-Z0-9ก-๙]/g, '_');
-    const fileName = `${safeName}_${Date.now()}.csv`;
+    const fileName = `${safeName}${ownerSuffix}_${Date.now()}.csv`;
 
     const formData = new FormData();
     formData.append('content', new Blob([csvContent], { type: 'text/csv' }), fileName);

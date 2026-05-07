@@ -12,7 +12,11 @@
       "WebFetch(domain:help.zoho.com)",
       "Bash(npm uninstall *)",
       "Bash(gh pr *)",
-      "Bash(node -e \"console.log\\(require\\('crypto'\\).randomBytes\\(48\\).toString\\('hex'\\)\\)\")"
+      "Bash(node -e \"console.log\\(require\\('crypto'\\).randomBytes\\(48\\).toString\\('hex'\\)\\)\")",
+      "Bash(npm show *)",
+      "Bash(Wait-Event -Timeout 90)",
+      "Bash(Get-Content \"C:\\\\Users\\\\CB1EE~1.SUT\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\D--aiquery\\\\edc39a08-e2ba-4fe5-865b-d4a80f48111f\\\\tasks\\\\br9c7tode.output\" -Tail 20)",
+      "Bash(npm run *)"
     ]
   }
 }

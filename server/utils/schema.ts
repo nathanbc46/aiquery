@@ -38,6 +38,7 @@ export const aiQueryRequests = mysqlTable('ai_query_requests', {
   managerId: varchar('manager_id', { length: 36 }).references(() => users.id),
   errorMessage: text('error_message'),
   managerComment: text('manager_comment'),
+  ownerDisplayName: varchar('owner_display_name', { length: 255 }),
   zohoLink: text('zoho_link'),
   zohoShareLink: text('zoho_share_link'),
   zohoSharePassword: varchar('zoho_share_password', { length: 255 }),

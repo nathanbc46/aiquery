@@ -17,7 +17,8 @@ CREATE TABLE IF NOT EXISTS `ai_query_requests` (
   `zoho_link` text DEFAULT NULL,
   `zoho_share_link` text DEFAULT NULL,
   `zoho_share_password` varchar(255) DEFAULT NULL,
-  -- Comment จาก Manager ตอนอนุมัติ (optional)
+  `owner_display_name` varchar(255) DEFAULT NULL,
+  -- ชื่อเจ้าของข้อมูล (สำหรับ Admin/Manager ที่ขอแทนคนอื่น)
   `expires_at` timestamp NULL DEFAULT NULL,
   -- วันหมดอายุของลิงก์ดาวน์โหลด (NULL = ไม่มีวันหมดอายุ)
   `reviewed_at` timestamp NULL DEFAULT NULL,
@@ -253,6 +254,19 @@ SET @preparedStatement = (
         (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = @dbname AND TABLE_NAME = @tablename AND COLUMN_NAME = @columnname) > 0,
         'SELECT 1',
         CONCAT('ALTER TABLE ', @tablename, ' ADD COLUMN ', @columnname, ' varchar(255) DEFAULT NULL AFTER zoho_share_link')
+      )
+  );
+PREPARE stmt FROM @preparedStatement;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+-- Check ai_query_requests for owner_display_name
+SET @tablename = 'ai_query_requests';
+SET @columnname = 'owner_display_name';
+SET @preparedStatement = (
+    SELECT IF(
+        (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = @dbname AND TABLE_NAME = @tablename AND COLUMN_NAME = @columnname) > 0,
+        'SELECT 1',
+        CONCAT('ALTER TABLE ', @tablename, ' ADD COLUMN ', @columnname, ' varchar(255) DEFAULT NULL AFTER zoho_share_password')
       )
   );
 PREPARE stmt FROM @preparedStatement;

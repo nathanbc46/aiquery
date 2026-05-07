@@ -27,8 +27,10 @@ const systemStatus = useState<any>('system-status', () => ({
   pendingApprovals: 0 
 }))
 
-// Authentication State
-const { data: auth, refresh: refreshAuth } = await useFetch<any>('/api/auth/me')
+// Authentication State — no await (keeps component sync, prevents Suspense mismatch)
+// useRequestHeaders forwards session cookie so SSR & client see the same auth state
+const reqHeaders = import.meta.server ? useRequestHeaders(['cookie']) : undefined
+const { data: auth, refresh: refreshAuth } = useFetch<any>('/api/auth/me', { headers: reqHeaders })
 const user = computed(() => auth.value?.user)
 
 const logout = () => {
@@ -168,14 +170,14 @@ const closeMobileMenu = () => {
         </div>
 
         <!-- Admin Settings Group -->
-        <div v-if="adminSettingsItems.length > 0" class="space-y-2">
-          <div class="px-4 flex items-center gap-2 mb-2">
-            <div class="w-1.5 h-1.5 rounded-full bg-blue-500"></div>
-            <span class="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">System Settings</span>
-          </div>
-          <ClientOnly>
-            <NuxtLink 
-              v-for="item in adminSettingsItems" 
+        <ClientOnly>
+          <div v-if="adminSettingsItems.length > 0" class="space-y-2">
+            <div class="px-4 flex items-center gap-2 mb-2">
+              <div class="w-1.5 h-1.5 rounded-full bg-blue-500"></div>
+              <span class="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">System Settings</span>
+            </div>
+            <NuxtLink
+              v-for="item in adminSettingsItems"
               :key="item.to"
               :to="item.to"
               class="flex items-center justify-between px-4 py-3 rounded-2xl text-slate-500 dark:text-slate-400 font-bold hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white transition-all group"
@@ -187,8 +189,8 @@ const closeMobileMenu = () => {
               </div>
               <ChevronRight class="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 transition-all -translate-x-2 group-hover:translate-x-0" />
             </NuxtLink>
-          </ClientOnly>
-        </div>
+          </div>
+        </ClientOnly>
       </nav>
 
       <div class="p-6 space-y-3">
@@ -297,7 +299,7 @@ const closeMobileMenu = () => {
           </NuxtLink>
 
           <!-- Mobile Admin Settings -->
-          <div v-if="adminSettingsItems.length > 0" class="pt-6 space-y-2">
+          <ClientOnly><div v-if="adminSettingsItems.length > 0" class="pt-6 space-y-2">
             <div class="px-6 flex items-center gap-2 mb-2">
               <div class="w-1.5 h-1.5 rounded-full bg-blue-500"></div>
               <span class="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">System Settings</span>
@@ -313,7 +315,7 @@ const closeMobileMenu = () => {
               <component :is="item.icon" class="w-5 h-5" />
               <span class="text-sm">{{ item.label }}</span>
             </NuxtLink>
-          </div>
+          </div></ClientOnly>
         </nav>
 
         <div class="p-6 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">

@@ -759,7 +759,10 @@ onUnmounted(() => {
               </div>
               <div class="flex items-center gap-1.5 px-2 py-0.5 bg-blue-50/50 dark:bg-blue-900/10 text-blue-600 dark:text-blue-400 rounded text-[9px] font-black uppercase tracking-widest border border-blue-100 dark:border-blue-800/50 shrink-0">
                 <User class="w-3 h-3" />
-                {{ req.user }}
+                {{ req.ownerDisplayName || req.user }}
+              </div>
+              <div v-if="req.ownerDisplayName" class="flex items-center gap-1 px-2 py-0.5 bg-slate-100/80 dark:bg-white/5 text-slate-400 dark:text-slate-500 rounded text-[9px] font-medium border border-slate-200 dark:border-white/10 shrink-0">
+                ดึงข้อมูลโดย {{ req.user }}
               </div>
               <div class="hidden sm:flex items-center gap-1.5 text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest whitespace-nowrap">
                 <Calendar class="w-3 h-3" />
