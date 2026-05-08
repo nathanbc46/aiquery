@@ -39,7 +39,7 @@ const logout = () => {
 
 const confirmLogout = async () => {
   await $fetch('/api/auth/logout', { method: 'POST' })
-  navigateTo('/login')
+  window.location.href = '/login'
 }
 
 const fetchStatus = async () => {
