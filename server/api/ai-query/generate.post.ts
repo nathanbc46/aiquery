@@ -47,6 +47,12 @@ export default defineEventHandler(async (event) => {
     // Inject the dynamic limit into the system instruction
     systemInstruction = systemInstruction.replace('{MAX_LIMIT}', maxLimit.toString());
 
+    // Force explanation format regardless of DB settings
+    systemInstruction += `\n\nCRITICAL OUTPUT FORMAT OVERRIDE: 
+For the "explanation" field in your JSON response, you MUST format it as a Markdown bulleted list (-). 
+Use **bold** text to highlight important keywords, table names, field names, or specific conditions. 
+Make the explanation concise and easy to read for a non-technical manager.`;
+
     const genAI = new GoogleGenerativeAI(apiKey);
     
     const model = genAI.getGenerativeModel({ 

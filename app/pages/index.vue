@@ -30,7 +30,8 @@ import {
   LayoutGrid,
   Maximize2,
   Minimize2,
-  CheckCircle2
+  CheckCircle2,
+  Lightbulb
 } from 'lucide-vue-next'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
@@ -46,6 +47,7 @@ const isCopied = ref(false)
 const isRefining = ref(false)
 const originalPrompt = ref('')
 const isSqlModalOpen = ref(false)
+const isTipsModalOpen = ref(false)
 const isDataGuideModalOpen = ref(false)
 const dataGuideContent = ref('')
 const isLoadingDataGuide = ref(false)
@@ -66,6 +68,8 @@ const showZohoPassword = ref(false)
 const isExportingZoho = ref(false)
 const generatedZohoLink = ref('')
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
+const generateAbortController = ref<AbortController | null>(null)
+const isCancelled = ref(false)
 
 const { data: auth } = await useFetch<any>('/api/auth/me')
 const user = computed(() => auth.value?.user)
@@ -287,6 +291,22 @@ const renderedDataGuide = computed(() => {
   return DOMPurify.sanitize(marked.parse(dataGuideContent.value) as string)
 })
 
+const renderedExplanation = computed(() => {
+  if (!generatedResult.value?.explanation) return ''
+  let text = generatedResult.value.explanation
+  
+  // Auto-convert legacy history items or plain text to bullet points
+  if (!text.includes('- ') && !text.includes('* ')) {
+    text = text.split('\n')
+      .map((line: string) => line.trim())
+      .filter((line: string) => line.length > 0)
+      .map((line: string) => `- ${line}`)
+      .join('\n')
+  }
+  
+  return DOMPurify.sanitize(marked.parse(text) as string)
+})
+
 const handleZohoExport = async () => {
   isExportingZoho.value = true
   try {
@@ -423,14 +443,21 @@ const generateSql = async () => {
   if (!prompt.value) return
   
   isGenerating.value = true
+  isCancelled.value = false
   generatedResult.value = null // Clear old result immediately
   error.value = null
   showPreview.value = false
   
+  if (generateAbortController.value) {
+    generateAbortController.value.abort()
+  }
+  generateAbortController.value = new AbortController()
+  
   try {
     const response = await $fetch<any>('/api/ai-query/generate', {
       method: 'POST',
-      body: { prompt: prompt.value }
+      body: { prompt: prompt.value },
+      signal: generateAbortController.value.signal
     })
     
     if (response.success && (response.status === 'success' || response.status === 'error')) {
@@ -452,10 +479,22 @@ const generateSql = async () => {
       error.value = response.error || 'ไม่สามารถสร้างคำสั่ง SQL ได้ โปรดลองระบุคำถามใหม่ให้ชัดเจนขึ้น'
     }
   } catch (e: any) {
+    if (e.name === 'AbortError') {
+      error.value = 'ยกเลิกการทำงานแล้ว (Cancelled by user)'
+      return
+    }
     console.error(e)
     error.value = e.data?.statusMessage || 'เกิดข้อผิดพลาดในการเชื่อมต่อกับ AI หรือ Database ล้มเหลว'
   } finally {
     isGenerating.value = false
+    generateAbortController.value = null
+  }
+}
+
+const cancelGenerate = () => {
+  if (generateAbortController.value) {
+    generateAbortController.value.abort()
+    isCancelled.value = true
   }
 }
 
@@ -555,6 +594,14 @@ const startEditingSql = () => {
   sqlModalError.value = ''
 }
 
+const openManualSqlEditor = () => {
+  if (!generatedResult.value) {
+    generatedResult.value = { sql: '', explanation: 'แก้ไข SQL ด้วยตัวเอง (Manual Query)' }
+  }
+  isSqlModalOpen.value = true
+  startEditingSql()
+}
+
 const cancelEditingSql = () => {
   isEditingSql.value = false
   sqlModalError.value = ''
@@ -572,6 +619,9 @@ const updateSql = async () => {
     })
 
     if (response.success) {
+      if (!generatedResult.value) {
+        generatedResult.value = { explanation: 'แก้ไข SQL ด้วยตัวเอง (Manual Query)' }
+      }
       generatedResult.value.sql = editedSql.value
       generatedResult.value.previewData = response.data
       generatedResult.value.previewCount = response.totalCount
@@ -658,6 +708,14 @@ const highlightSql = (sqlStr: string) => {
           >
             <Database class="w-3.5 h-3.5 group-hover:scale-110 transition-transform" />
             สามารถขอข้อมูลอะไรได้บ้าง?
+          </button>
+          <button
+            @click="isTipsModalOpen = true"
+            class="group flex items-center gap-2 px-3 py-1 rounded-xl bg-amber-50/50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 text-[10px] font-black uppercase tracking-[0.2em] border border-amber-100/50 dark:border-amber-800/50 shadow-sm backdrop-blur-md hover:bg-amber-100 dark:hover:bg-amber-900/40 transition-all active:scale-95"
+            title="เทคนิคการถาม AI"
+          >
+            <Lightbulb class="w-3.5 h-3.5 group-hover:rotate-12 transition-transform" />
+            เทคนิคการถาม
           </button>
         </div>
 
@@ -758,7 +816,7 @@ const highlightSql = (sqlStr: string) => {
               </div>
               <div class="space-y-3">
                 <h3 class="font-bold text-amber-900 dark:text-amber-200 text-lg">AI ต้องการข้อมูลเพิ่มเติม</h3>
-                <p class="text-amber-800 dark:text-amber-400 leading-relaxed">{{ generatedResult.explanation }}</p>
+                <div class="text-amber-800 dark:text-amber-400 leading-relaxed prose prose-sm prose-amber dark:prose-invert prose-p:my-1 prose-markdown" v-html="renderedExplanation"></div>
                 <button type="button" @click="handleClarification" class="mt-2 text-sm font-bold text-amber-700 dark:text-amber-400 hover:text-amber-900 dark:hover:text-amber-200 flex items-center gap-1.5 underline underline-offset-8 decoration-amber-500/30 hover:decoration-amber-500 transition-all">
                   ตกลง ฉันจะระบุข้อมูลใหม่
                   <ArrowRight class="w-4 h-4" />
@@ -768,8 +826,8 @@ const highlightSql = (sqlStr: string) => {
           </div>
         </transition>
         
-        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-10 pt-2">
-          <div class="flex flex-wrap gap-2">
+        <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-6 pt-2">
+          <div class="flex flex-wrap gap-2 flex-1 min-w-0">
             <button 
               v-for="text in suggestions" 
               :key="text"
@@ -809,20 +867,43 @@ const highlightSql = (sqlStr: string) => {
             </div>
           </div>
           
-          <button 
-            type="submit" 
-            :disabled="isGenerating || !prompt"
-            class="relative group px-12 py-5 bg-gradient-to-r from-slate-900 to-slate-800 dark:from-blue-600 dark:to-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed text-white font-black rounded-[2rem] shadow-2xl shadow-blue-500/30 transition-all flex items-center justify-center gap-3 active:scale-95 shrink-0 overflow-hidden uppercase tracking-widest text-sm"
-          >
-            <div class="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -translate-x-full group-hover:animate-shimmer"></div>
-            <RotateCcw v-if="isGenerating" class="w-6 h-6 animate-spin text-white" />
-            <div v-else class="flex items-center gap-2">
-              <Database class="w-6 h-6 group-hover:scale-110 transition-transform" />
-              <div class="w-px h-4 bg-white/20"></div>
-              <Sparkles class="w-5 h-5 text-blue-200" />
-            </div>
-            <span class="text-base">{{ isGenerating ? 'กำลังคิด...' : 'ประมวลผลด้วย AI' }}</span>
-          </button>
+          <div class="flex flex-wrap items-center justify-end gap-3 shrink-0">
+            <button 
+              v-if="!isGenerating && isCancelled"
+              type="button"
+              @click="openManualSqlEditor"
+              class="px-8 py-5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-black rounded-[2rem] shadow-sm hover:bg-slate-200 dark:hover:bg-slate-700 transition-all flex items-center justify-center gap-3 active:scale-95 shrink-0 uppercase tracking-widest text-sm border border-slate-200 dark:border-slate-700"
+              title="เขียนคำสั่ง SQL ด้วยตัวเอง"
+            >
+              <Terminal class="w-6 h-6" />
+              เขียน SQL เอง
+            </button>
+
+            <button 
+              v-if="!isGenerating"
+              type="submit" 
+              :disabled="!prompt"
+              class="relative group px-12 py-5 bg-gradient-to-r from-slate-900 to-slate-800 dark:from-blue-600 dark:to-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed text-white font-black rounded-[2rem] shadow-2xl shadow-blue-500/30 transition-all flex items-center justify-center gap-3 active:scale-95 shrink-0 overflow-hidden uppercase tracking-widest text-sm"
+            >
+              <div class="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -translate-x-full group-hover:animate-shimmer"></div>
+              <div class="flex items-center gap-2">
+                <Database class="w-6 h-6 group-hover:scale-110 transition-transform" />
+              </div>
+              ประมวลผลด้วย AI
+            </button>
+
+            <button 
+              v-else
+              type="button" 
+              @click="cancelGenerate"
+              class="relative group px-12 py-5 bg-gradient-to-r from-slate-900 to-slate-800 dark:from-blue-600 dark:to-indigo-600 text-white font-black rounded-[2rem] shadow-2xl shadow-blue-500/30 transition-all flex items-center justify-center gap-3 active:scale-95 shrink-0 overflow-hidden uppercase tracking-widest text-sm hover:opacity-90"
+              title="ยกเลิกการทำงาน"
+            >
+              <div class="absolute inset-0 bg-white/20 animate-pulse"></div>
+              <Loader2 class="w-5 h-5 relative z-10 animate-spin" />
+              <span class="relative z-10">กำลังประมวลผล... (กดเพื่อหยุด)</span>
+            </button>
+          </div>
         </div>
 
         <!-- Inline Error Alert -->
@@ -908,7 +989,7 @@ const highlightSql = (sqlStr: string) => {
                   View SQL
                 </button>
               </div>
-              <p class="text-slate-700 dark:text-slate-200 leading-relaxed text-lg font-medium">{{ generatedResult.explanation }}</p>
+              <div class="text-slate-700 dark:text-slate-200 leading-relaxed text-sm font-medium prose prose-slate dark:prose-invert prose-p:my-2 prose-ul:my-2 prose-li:my-1 max-w-none prose-markdown" v-html="renderedExplanation"></div>
             </div>
             
             <div class="md:w-56 p-8 bg-slate-50/50 dark:bg-slate-950/50 flex flex-col justify-center items-center text-center">
@@ -1735,6 +1816,199 @@ const highlightSql = (sqlStr: string) => {
         </transition>
       </Teleport>
     </ClientOnly>
+
+    <!-- Tips Modal -->
+    <ClientOnly>
+      <Teleport to="body">
+        <transition name="modal">
+          <div v-if="isTipsModalOpen" class="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-md" @click="isTipsModalOpen = false">
+            <div class="bg-white dark:bg-slate-900 rounded-[2rem] shadow-2xl w-full max-w-lg overflow-hidden border border-slate-200 dark:border-slate-800 animate-in zoom-in-95 duration-300" @click.stop>
+              <!-- Header -->
+              <div class="px-7 py-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-amber-50/40 dark:bg-amber-900/10">
+                <div class="flex items-center gap-3">
+                  <div class="w-9 h-9 rounded-xl bg-amber-100 dark:bg-amber-900/40 flex items-center justify-center text-amber-600 dark:text-amber-400">
+                    <Lightbulb class="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 class="text-base font-black text-slate-900 dark:text-white">เทคนิคการถาม AI</h3>
+                    <p class="text-[10px] font-bold text-amber-600/60 dark:text-amber-400/60 uppercase tracking-widest">Query Tips & Tricks</p>
+                  </div>
+                </div>
+                <button @click="isTipsModalOpen = false" class="p-2 rounded-xl text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
+                  <X class="w-5 h-5" />
+                </button>
+              </div>
+
+              <!-- Content -->
+              <div class="p-6 space-y-5 max-h-[70vh] overflow-y-auto custom-scrollbar">
+
+                <!-- Active Assets -->
+                <div class="space-y-2.5">
+                  <div class="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                    <span class="w-4 h-0.5 bg-emerald-500 rounded-full"></span>
+                    ข้อมูล Asset ปัจจุบัน (Active)
+                  </div>
+                  <p class="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                    ใช้คำว่า <span class="font-black text-emerald-600 dark:text-emerald-400">"ปัจจุบัน"  "active"  "current"  "unique"</span> — ระบบจะดึงเฉพาะ SN ล่าสุดต่อบริษัทให้อัตโนมัติ
+                  </p>
+                  <div class="space-y-1.5">
+                    <div v-for="tip in [
+                      'รายการ asset ปัจจุบันของบริษัท ABC',
+                      'SN ที่ยังใช้งานอยู่ แยกตามบริษัท',
+                      'จำนวน qty รวมของ AutoCAD LT ในปัจจุบัน',
+                      'asset ที่ active แต่หมดอายุในเดือนนี้'
+                    ]" :key="tip"
+                      @click="prompt = tip; isTipsModalOpen = false; focusAndEnd()"
+                      class="flex items-center gap-2.5 px-3.5 py-2 rounded-xl bg-emerald-50 dark:bg-emerald-900/20 text-emerald-800 dark:text-emerald-300 text-[11px] font-medium cursor-pointer hover:bg-emerald-100 dark:hover:bg-emerald-900/40 transition-colors group border border-emerald-100 dark:border-emerald-900/30"
+                    >
+                      <ArrowRight class="w-3 h-3 shrink-0 opacity-50 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all" />
+                      {{ tip }}
+                    </div>
+                  </div>
+                </div>
+
+                <!-- History -->
+                <div class="space-y-2.5">
+                  <div class="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                    <span class="w-4 h-0.5 bg-slate-400 rounded-full"></span>
+                    ต้องการประวัติทั้งหมด (ทุก Renewal)
+                  </div>
+                  <div class="space-y-1.5">
+                    <div v-for="tip in [
+                      'ประวัติการต่ออายุทั้งหมดของ SN XXXX',
+                      'รายการ asset ทั้งหมดของบริษัท ABC รวมถึงประวัติการต่ออายุ'
+                    ]" :key="tip"
+                      @click="prompt = tip; isTipsModalOpen = false; focusAndEnd()"
+                      class="flex items-center gap-2.5 px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-800/50 text-slate-600 dark:text-slate-400 text-[11px] font-medium cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors group border border-slate-100 dark:border-slate-800"
+                    >
+                      <ArrowRight class="w-3 h-3 shrink-0 opacity-50 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all" />
+                      {{ tip }}
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Grouping -->
+                <div class="space-y-2.5">
+                  <div class="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                    <span class="w-4 h-0.5 bg-blue-500 rounded-full"></span>
+                    จัดกลุ่ม / สรุปข้อมูล
+                  </div>
+                  <p class="text-[11px] text-slate-500 dark:text-slate-400">ลงท้ายด้วย <span class="font-black text-blue-600 dark:text-blue-400">"แยกตาม..."</span> เพื่อให้ AI สร้าง GROUP BY ให้อัตโนมัติ</p>
+                  <div class="space-y-1.5">
+                    <div v-for="tip in [
+                      'นับจำนวน Lead แยกตามจังหวัด',
+                      'ยอดขายรวมแยกตามทีมฝ่ายขาย',
+                      'จำนวน asset แยกตามสินค้าและบริษัท'
+                    ]" :key="tip"
+                      @click="prompt = tip; isTipsModalOpen = false; focusAndEnd()"
+                      class="flex items-center gap-2.5 px-3.5 py-2 rounded-xl bg-blue-50 dark:bg-blue-900/20 text-blue-800 dark:text-blue-300 text-[11px] font-medium cursor-pointer hover:bg-blue-100 dark:hover:bg-blue-900/40 transition-colors group border border-blue-100 dark:border-blue-900/30"
+                    >
+                      <ArrowRight class="w-3 h-3 shrink-0 opacity-50 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all" />
+                      {{ tip }}
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Time Filter -->
+                <div class="space-y-2.5">
+                  <div class="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                    <span class="w-4 h-0.5 bg-indigo-500 rounded-full"></span>
+                    กรองตามช่วงเวลา
+                  </div>
+                  <p class="text-[11px] text-slate-500 dark:text-slate-400">ระบุช่วงเวลาให้ชัด เช่น <span class="font-black text-indigo-600 dark:text-indigo-400">"ในปี 2024"  "เดือนนี้"  "ย้อนหลัง 1 ปี"  "ระหว่าง ม.ค.-มี.ค."</span></p>
+                  <div class="space-y-1.5">
+                    <div v-for="tip in [
+                      'asset ที่หมดอายุภายใน 30 วันข้างหน้า',
+                      'ยอดขายระหว่าง 1 ม.ค. ถึง 31 มี.ค. 2025',
+                      'Lead ใหม่ย้อนหลัง 1 ปี แต่ยังไม่ถูกติดต่อ'
+                    ]" :key="tip"
+                      @click="prompt = tip; isTipsModalOpen = false; focusAndEnd()"
+                      class="flex items-center gap-2.5 px-3.5 py-2 rounded-xl bg-indigo-50 dark:bg-indigo-900/20 text-indigo-800 dark:text-indigo-300 text-[11px] font-medium cursor-pointer hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors group border border-indigo-100 dark:border-indigo-900/30"
+                    >
+                      <ArrowRight class="w-3 h-3 shrink-0 opacity-50 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all" />
+                      {{ tip }}
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Exclusion -->
+                <div class="space-y-2.5">
+                  <div class="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                    <span class="w-4 h-0.5 bg-rose-500 rounded-full"></span>
+                    ยกเว้น / ไม่รวม
+                  </div>
+                  <p class="text-[11px] text-slate-500 dark:text-slate-400">ใช้คำว่า <span class="font-black text-rose-600 dark:text-rose-400">"ที่ไม่มี..."  "ยกเว้น..."  "แต่ไม่รวม..."</span> เพื่อสร้างเงื่อนไข NOT IN</p>
+                  <div class="space-y-1.5">
+                    <div v-for="tip in [
+                      'บริษัทที่มี AutoCAD LT แต่ไม่มี GstarCAD',
+                      'ลูกค้าที่มี asset หมดอายุ แต่ไม่มี Opp ใน Topline'
+                    ]" :key="tip"
+                      @click="prompt = tip; isTipsModalOpen = false; focusAndEnd()"
+                      class="flex items-center gap-2.5 px-3.5 py-2 rounded-xl bg-rose-50 dark:bg-rose-900/20 text-rose-800 dark:text-rose-300 text-[11px] font-medium cursor-pointer hover:bg-rose-100 dark:hover:bg-rose-900/40 transition-colors group border border-rose-100 dark:border-rose-900/30"
+                    >
+                      <ArrowRight class="w-3 h-3 shrink-0 opacity-50 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all" />
+                      {{ tip }}
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Opportunity / Topline -->
+                <div class="space-y-2.5">
+                  <div class="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                    <span class="w-4 h-0.5 bg-amber-500 rounded-full"></span>
+                    Opportunity / Topline
+                  </div>
+                  <p class="text-[11px] text-slate-500 dark:text-slate-400">คำว่า <span class="font-black text-amber-600 dark:text-amber-400">"Topline"  "ใน Pipeline"  "ยังไม่ปิดดีล"</span> จะกรองเฉพาะ Opp ที่ยัง Active อยู่</p>
+                  <div class="space-y-1.5">
+                    <div v-for="tip in [
+                      'ดีลที่อยู่ใน Topline ของทีม Mi Software',
+                      'Opp ที่เปิดอยู่และมีสินค้าหมวด SolidWorks'
+                    ]" :key="tip"
+                      @click="prompt = tip; isTipsModalOpen = false; focusAndEnd()"
+                      class="flex items-center gap-2.5 px-3.5 py-2 rounded-xl bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-300 text-[11px] font-medium cursor-pointer hover:bg-amber-100 dark:hover:bg-amber-900/40 transition-colors group border border-amber-100 dark:border-amber-900/30"
+                    >
+                      <ArrowRight class="w-3 h-3 shrink-0 opacity-50 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all" />
+                      {{ tip }}
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Team & Hierarchy -->
+                <div class="space-y-2.5">
+                  <div class="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                    <span class="w-4 h-0.5 bg-violet-500 rounded-full"></span>
+                    ทีม & สายงาน (Hierarchy)
+                  </div>
+                  <div class="space-y-1.5 text-[11px] text-slate-500 dark:text-slate-400">
+                    <p><span class="font-black text-violet-600 dark:text-violet-400">"ภายใต้..."  "รวมลูกน้อง"  "ในสายงาน"</span> → รวมทีมย่อยทั้งหมดในสายงาน</p>
+                    <p><span class="font-black text-slate-600 dark:text-slate-300">"ของทีม..."  "เฉพาะทีม"</span> → เฉพาะทีมนั้นโดยตรง ไม่รวมลูกน้อง</p>
+                  </div>
+                  <div class="space-y-1.5">
+                    <div v-for="tip in [
+                      'ยอดขายทั้งหมดในสายงานของ Mi Software รวมลูกน้อง',
+                      'จำนวน Lead เฉพาะทีมกรุงเทพ ไม่รวมทีมย่อย',
+                      'asset ที่หมดอายุภายใต้ทีม Service'
+                    ]" :key="tip"
+                      @click="prompt = tip; isTipsModalOpen = false; focusAndEnd()"
+                      class="flex items-center gap-2.5 px-3.5 py-2 rounded-xl bg-violet-50 dark:bg-violet-900/20 text-violet-800 dark:text-violet-300 text-[11px] font-medium cursor-pointer hover:bg-violet-100 dark:hover:bg-violet-900/40 transition-colors group border border-violet-100 dark:border-violet-900/30"
+                    >
+                      <ArrowRight class="w-3 h-3 shrink-0 opacity-50 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all" />
+                      {{ tip }}
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Note -->
+                <div class="p-3.5 bg-blue-50 dark:bg-blue-900/10 border border-blue-100 dark:border-blue-900/30 rounded-2xl flex items-start gap-2.5">
+                  <Info class="w-3.5 h-3.5 text-blue-500 shrink-0 mt-0.5" />
+                  <p class="text-[11px] text-blue-700 dark:text-blue-400 leading-relaxed">คลิกที่ตัวอย่างเพื่อใช้คำถามนั้นทันทีได้เลยครับ</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </transition>
+      </Teleport>
+    </ClientOnly>
   </div>
 </template>
 
@@ -1774,25 +2048,44 @@ textarea::placeholder {
 }
 
 /* Data Guide Styling */
-.data-guide-content h2 {
+:deep(.data-guide-content h2) {
   @apply text-xl font-black text-indigo-700 dark:text-indigo-400 mt-16 mb-8 flex items-center gap-3 bg-indigo-50/50 dark:bg-indigo-900/20 px-6 py-4 rounded-2xl border-l-8 border-indigo-600 shadow-sm;
 }
-.data-guide-content p, .data-guide-content li {
+:deep(.data-guide-content p), :deep(.data-guide-content li) {
   @apply text-slate-600 dark:text-slate-400 text-base leading-loose mb-4 px-2;
 }
-.data-guide-content strong {
+:deep(.data-guide-content strong) {
   @apply text-slate-900 dark:text-slate-200 font-bold;
 }
-.data-guide-content hr {
+:deep(.data-guide-content hr) {
   @apply my-16 border-slate-100 dark:border-slate-800 opacity-0;
 }
-.data-guide-content blockquote {
+:deep(.data-guide-content blockquote) {
   @apply pl-6 border-l-4 border-amber-500 bg-amber-50/30 dark:bg-amber-900/10 py-6 pr-6 rounded-r-3xl italic my-10 shadow-sm;
 }
-.data-guide-content ul {
-  @apply space-y-4 list-none pl-2 my-8;
+:deep(.data-guide-content ul) {
+  @apply space-y-4 list-none pl-6 my-8;
 }
-.data-guide-content ul li {
-  @apply flex items-start gap-3 before:content-['•'] before:text-indigo-500 before:font-black before:text-xl before:mt-[-2px];
+:deep(.data-guide-content ul li) {
+  @apply relative;
+}
+:deep(.data-guide-content ul li::before) {
+  content: '•';
+  @apply absolute -left-5 text-indigo-500 font-black text-xl top-[-2px] leading-none;
+}
+
+/* Markdown Rendering Styling */
+:deep(.prose-markdown ul) {
+  @apply space-y-3 list-none pl-6 my-4;
+}
+:deep(.prose-markdown ul li) {
+  @apply relative leading-relaxed;
+}
+:deep(.prose-markdown ul li::before) {
+  content: '•';
+  @apply absolute -left-5 text-blue-500 font-black text-xl top-[-2px] leading-none;
+}
+:deep(.prose-markdown strong) {
+  @apply text-slate-900 dark:text-white font-black px-1.5 py-0.5 bg-slate-100 dark:bg-slate-800 rounded-md shadow-sm border border-slate-200 dark:border-slate-700;
 }
 </style>

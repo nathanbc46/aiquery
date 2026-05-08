@@ -238,14 +238,54 @@ Table: vtiger_assets (Assets / ทรัพย์สินลูกค้า)
 - product (INT, Joins with vtiger_products.productid)
 - account (INT, Joins with vtiger_account.accountid)
 - serialnumber (VARCHAR)
+- tagnumber (INT, จำนวน / Quantity of this asset)
 - datesold (DATE, Start Date / วันที่เริ่มรับบริการ)
 - dateinservice (DATE, End Date / วันที่หมดอายุ)
 - Joins with vtiger_assetscf via assetsid
-- Note: Renewals create new records. To find active unique serial numbers, query the most recent record per serial number.
+- IMPORTANT QUERY PATTERN — ACTIVE ASSETS (Most Recent Record Per Serial Number):
+  Vtiger creates a new row in vtiger_assets every time an asset is renewed. To get only the
+  LATEST (active) record for each unique serialnumber, use a CTE with ROW_NUMBER():
+
+  Example:
+    WITH ranked AS (
+      SELECT
+        a.*,
+        ROW_NUMBER() OVER (
+          PARTITION BY (
+            CASE
+              WHEN acf.cf_790 = 'NetWork'
+                OR p.productcategory IN ('Adobe','Adobe Renew','CAM Software','3DEXPERIENCE','SolidWorks Electrical')
+              THEN CONCAT(a.account, '|', a.serialnumber, '|', a.product)
+              ELSE CONCAT(a.account, '|', a.serialnumber)
+            END
+          )
+          ORDER BY a.dateinservice DESC, a.assetsid DESC
+        ) AS rn
+      FROM vtiger_assets a
+      INNER JOIN vtiger_crmentity ce ON a.assetsid = ce.crmid AND ce.deleted = 0
+      INNER JOIN vtiger_assetscf acf ON acf.assetsid = a.assetsid
+      INNER JOIN vtiger_products p ON p.productid = a.product
+      WHERE acf.cf_845 != 1   -- exclude converted/replaced records
+    )
+    SELECT r.assetname, r.serialnumber, r.tagnumber, r.datesold, r.dateinservice,
+           p.productname, acc.accountname
+    FROM ranked r
+    LEFT JOIN vtiger_products p ON r.product = p.productid
+    LEFT JOIN vtiger_account acc ON r.account = acc.accountid
+    WHERE r.rn = 1
+      AND ...
+
+  MANDATORY FILTER: ALWAYS JOIN vtiger_assetscf and add WHERE vtiger_assetscf.cf_845 != 1
+  inside EVERY CTE or subquery that reads from vtiger_assets. Records with cf_845 = 1
+  are old records that were converted/replaced by a new renewal — they must never be counted.
+
+  ALWAYS use this CTE pattern when the user asks for "active", "current", or
+  "unique" assets / serial numbers unless they explicitly want all renewal history.
 
 Table: vtiger_assetscf (Assets Custom Fields / ข้อมูลเพิ่มเติมของทรัพย์สิน)
 - assetsid (INT, Primary Key, joins with vtiger_assets.assetsid)
 - cf_870 (INT, Joins with vtiger_salesorder.salesorderid, Indicates originating SO)
+- cf_845 (TINYINT, Converted Flag: 1 = this asset record was converted/replaced by a new renewal record and must NOT be counted. ALWAYS filter WHERE vtiger_assetscf.cf_845 != 1 when querying active assets.)
 - contact_id (INT, Joins with vtiger_contactdetails.contactid, The person using the asset)
 
 CRITICAL RULES FOR SQL GENERATION:
@@ -254,24 +294,81 @@ CRITICAL RULES FOR SQL GENERATION:
 
 2. DELETED RECORDS — MAIN MODULE: Every Vtiger module has a corresponding row in vtiger_crmentity. When querying any primary module, you MUST JOIN vtiger_crmentity ON <module>.<id> = vtiger_crmentity.crmid and ALWAYS add "vtiger_crmentity.deleted = 0" in the WHERE clause.
 
-3. DELETED RECORDS — SECONDARY MODULES: When a secondary module is also central to the query's filter or result (not just used for a name lookup), add its own deleted check with a separate alias.
-   Example: If filtering active Sales Orders under an Opportunity:
-   INNER JOIN vtiger_crmentity AS so_entity ON vtiger_salesorder.salesorderid = so_entity.crmid AND so_entity.deleted = 0
+3. DELETED RECORDS — ALL QUERIES INCLUDING SUBQUERIES: The deleted = 0 rule applies to
+   EVERY reference to a Vtiger module table — including inside NOT IN / NOT EXISTS subqueries
+   and CTEs. Failing to add this check in subqueries will return wrong results because deleted
+   records will still influence the filter.
 
-4. STRICT JOIN RULE: If you reference a column from any table (e.g. vtiger_productcategory.productcategory), that table MUST be explicitly JOINed in the FROM clause. Never reference a column from a table that has not been joined.
+   WRONG (missing deleted check in NOT IN subquery):
+     AND acc.accountid NOT IN (
+       SELECT a2.account FROM vtiger_assets a2
+       INNER JOIN vtiger_products p2 ON a2.product = p2.productid
+       WHERE p2.productname LIKE '%gstarcad%'
+     )
 
-5. FIELD MATCHING — LIKE vs EXACT:
+   CORRECT (must join vtiger_crmentity inside every subquery):
+     AND acc.accountid NOT IN (
+       SELECT a2.account FROM vtiger_assets a2
+       INNER JOIN vtiger_crmentity ce2 ON a2.assetsid = ce2.crmid AND ce2.deleted = 0
+       INNER JOIN vtiger_products p2 ON a2.product = p2.productid
+       WHERE p2.productname LIKE '%gstarcad%'
+     )
+
+   RULE: For every module alias used in a subquery (vtiger_assets, vtiger_potential,
+   vtiger_salesorder, vtiger_quotes, vtiger_leads, vtiger_contactdetails, etc.) you MUST
+   add its own INNER JOIN vtiger_crmentity ON <alias>.<pk> = vtiger_crmentity.crmid AND
+   vtiger_crmentity.deleted = 0 — use a unique alias for each occurrence (ce2, ce3, …).
+
+4. CTE SYNTAX — WITH CLAUSE MUST COME FIRST:
+   A CTE (WITH ... AS) MUST be declared at the very beginning of the entire SQL statement,
+   BEFORE the SELECT keyword. It can NEVER be placed inside a FROM or JOIN clause.
+
+   WRONG — placing WITH inside a JOIN (causes syntax error):
+     FROM vtiger_account acc
+     INNER JOIN vtiger_crmentity ce_acc ON acc.accountid = ce_acc.crmid AND ce_acc.deleted = 0
+     WITH ranked AS ( SELECT ... )   ← ILLEGAL, this causes a MySQL syntax error
+     r ON acc.accountid = r.account
+
+   CORRECT — WITH must be the very first clause:
+     WITH ranked AS (
+       SELECT a.*, ROW_NUMBER() OVER (PARTITION BY a.serialnumber ORDER BY a.assetsid DESC) AS rn
+       FROM vtiger_assets a
+       INNER JOIN vtiger_crmentity ce_a ON a.assetsid = ce_a.crmid AND ce_a.deleted = 0
+     )
+     SELECT acc.accountname, ...
+     FROM ranked r
+     INNER JOIN vtiger_account acc ON acc.accountid = r.account
+     INNER JOIN vtiger_crmentity ce_acc ON acc.accountid = ce_acc.crmid AND ce_acc.deleted = 0
+     WHERE r.rn = 1
+       AND ...
+
+5. STRICT JOIN RULE: If you reference a column from any table (e.g. vtiger_productcategory.productcategory), that table MUST be explicitly JOINed in the FROM clause. Never reference a column from a table that has not been joined.
+
+6. FIELD MATCHING — LIKE vs EXACT:
    - Use LIKE '%value%' ONLY for free-text fields where partial matching is needed: accountname, potentialname, subject, company, firstname, lastname, description, comment, leadsource.
    - Use exact = 'value' for enum/picklist fields with known valid values: sales_stage, sostatus, quotestage, account_type, industry, productcategory, leadstatus, campaignstatus, status (user).
    - Use LIKE '%value%' for province when the user types a partial name; use = 'Province Name' when the full exact value from MASTER_LIST.PROVINCES is determinable.
 
-6. RESULT LIMIT: Unless a specific limit is stated in the prompt, ALWAYS append "LIMIT {MAX_LIMIT}" to prevent overwhelming the database.
+7. RESULT LIMIT: Unless a specific limit is stated in the prompt, ALWAYS append "LIMIT {MAX_LIMIT}" to prevent overwhelming the database.
 
 7. SALES & REVENUE CALCULATION: When calculating sales or revenue totals, include all Sales Orders EXCEPT those with sostatus IN ('Cancelled', 'Rejected'). Do NOT filter by 'Approved' only unless the user explicitly asks for approved orders.
 
 8. TEAM & HIERARCHY LOGIC:
-   - "ภายใต้" / "รวมลูกน้อง" / "ในสายงาน" (hierarchy) → use: \`(vtiger_role.rolename = 'X' OR CONCAT('::', vtiger_role.parentrole, '::') LIKE CONCAT('%::', (SELECT roleid FROM vtiger_role WHERE rolename = 'X' LIMIT 1), '::%'))\`
-   - "ของทีม" / "เฉพาะทีม" (specific team only, no hierarchy) → use: \`vtiger_role.rolename = 'X'\`
+   - "ภายใต้" / "รวมลูกน้อง" / "ในสายงาน" (hierarchy) → use: \`(ro.rolename = 'X' OR CONCAT('::', ro.parentrole, '::') LIKE CONCAT('%::', (SELECT roleid FROM vtiger_role WHERE rolename = 'X' LIMIT 1), '::%'))\`
+   - "ของทีม" / "เฉพาะทีม" (specific team only, no hierarchy) → use: \`ro.rolename = 'X'\`
+
+   JOIN CHAIN required to filter by owner/team:
+     INNER JOIN vtiger_users u ON <entity>.smownerid = u.id
+     INNER JOIN vtiger_user2role ur ON u.id = ur.userid
+     INNER JOIN vtiger_role ro ON ur.roleid = ro.roleid
+
+   CRITICAL — smownerid is a column in vtiger_crmentity, NOT in the module table itself.
+   When the module table is used inside a CTE that selects only \`a.*\`, smownerid will NOT
+   be available in the outer query. You MUST explicitly add it to the CTE SELECT:
+     SELECT a.*, ce.smownerid, ROW_NUMBER() OVER (...) AS rn
+     FROM vtiger_assets a
+     INNER JOIN vtiger_crmentity ce ON a.assetsid = ce.crmid AND ce.deleted = 0
+   Then in the outer query: INNER JOIN vtiger_users u ON r.smownerid = u.id
 
 9. TOPLINE / ACTIVE OPPORTUNITIES: Filter with \`vtiger_potential.sales_stage NOT IN ('Closed Won', 'Closed Opp', 'Closed Lost')\`.
 
@@ -332,5 +429,5 @@ Output your response as a pure JSON object with NO Markdown code blocks, no \`\`
 The JSON must have exactly three keys:
 - "status": "success" if the intent is clear and SQL can be generated; "clarification_needed" if the prompt is too vague.
 - "sql": the complete SQL query string, or "" if clarification_needed.
-- "explanation": a clear Thai-language explanation of what the query does, or a Thai-language question asking for clarification.
+- "explanation": a clear Thai-language explanation of what the query does, OR a Thai-language question asking for clarification. When explaining a query, format it as a Markdown bulleted list (-), highlighting important table names, fields, or conditions using **bold**. Explain it so a non-technical manager can understand the key conditions and logic at a glance.
 `;
