@@ -312,14 +312,33 @@ const copyExplanation = async () => {
   if (!generatedResult.value?.explanation) return
   try {
     const textToCopy = generatedResult.value.explanation.replace(/\*/g, '')
-    await navigator.clipboard.writeText(textToCopy)
+    
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(textToCopy)
+    } else {
+      const textArea = document.createElement("textarea")
+      textArea.value = textToCopy
+      textArea.style.position = "fixed"
+      textArea.style.left = "-999999px"
+      textArea.style.top = "-999999px"
+      document.body.appendChild(textArea)
+      textArea.focus()
+      textArea.select()
+      
+      const successful = document.execCommand('copy')
+      document.body.removeChild(textArea)
+      
+      if (!successful) throw new Error('Fallback copy failed')
+    }
+    
     isExplanationCopied.value = true
     toast.success('คัดลอกสำเร็จ', 'คัดลอกคำอธิบายลงคลิปบอร์ดแล้ว')
     setTimeout(() => {
       isExplanationCopied.value = false
     }, 2000)
   } catch (err) {
-    toast.error('ผิดพลาด', 'ไม่สามารถคัดลอกข้อความได้')
+    console.error('Clipboard error:', err)
+    toast.error('ผิดพลาด', 'เบราว์เซอร์ไม่อนุญาตให้คัดลอก (อาจเป็นเพราะไม่ได้ใช้ HTTPS)')
   }
 }
 
@@ -420,12 +439,34 @@ const refineQuestion = () => {
 const copySql = async () => {
   if (!generatedResult.value?.sql) return
   try {
-    await navigator.clipboard.writeText(formatSql(generatedResult.value.sql))
+    const textToCopy = formatSql(generatedResult.value.sql)
+    
+    // Check if clipboard API is available and context is secure
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(textToCopy)
+    } else {
+      // Fallback for non-HTTPS connections (e.g. local IP testing)
+      const textArea = document.createElement("textarea")
+      textArea.value = textToCopy
+      textArea.style.position = "fixed"
+      textArea.style.left = "-999999px"
+      textArea.style.top = "-999999px"
+      document.body.appendChild(textArea)
+      textArea.focus()
+      textArea.select()
+      
+      const successful = document.execCommand('copy')
+      document.body.removeChild(textArea)
+      
+      if (!successful) throw new Error('Fallback copy failed')
+    }
+    
     isCopied.value = true
     setTimeout(() => { isCopied.value = false }, 2000)
     toast.success('คัดลอกแล้ว', 'คัดลอกคำสั่ง SQL ลง Clipboard เรียบร้อย')
   } catch (err) {
-    toast.error('ล้มเหลว', 'ไม่สามารถคัดลอกคำสั่งได้')
+    console.error('Clipboard error:', err)
+    toast.error('ล้มเหลว', 'เบราว์เซอร์ไม่อนุญาตให้คัดลอก (อาจเป็นเพราะไม่ได้ใช้ HTTPS)')
   }
 }
 
