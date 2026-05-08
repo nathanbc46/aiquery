@@ -7,7 +7,7 @@ export default defineNuxtConfig({
   css: ['~/assets/css/main.css'],
   colorMode: {
     classSuffix: '',
-    preference: 'system',
+    preference: 'light',
     fallback: 'light',
   },
   devtools: { enabled: true },
@@ -50,6 +50,7 @@ export default defineNuxtConfig({
         '@vue/devtools-kit',
         'workbox-window',
         'lucide-vue-next',
+        'apexcharts',
       ]
     }
   },

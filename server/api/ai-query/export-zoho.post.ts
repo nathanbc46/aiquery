@@ -1,9 +1,9 @@
 import { useDb } from '../../utils/db';
 import { sql } from 'drizzle-orm';
 import { eq } from 'drizzle-orm';
-import { getAuthSession } from '../../utils/auth';
+import { getAuthSession, findOrCreateAiUser } from '../../utils/auth';
 import { getValidZohoToken } from '../../utils/zoho';
-import { aiQueryRequests, vtigerUsers } from '../../utils/schema';
+import { aiQueryRequests } from '../../utils/schema';
 
 export default defineEventHandler(async (event) => {
   const session = await getAuthSession(event);
@@ -47,19 +47,14 @@ export default defineEventHandler(async (event) => {
       )
     ].join('\n');
 
-    // 4. Resolve owner name if provided
+    // 4. Update user_id (owner) if ownerVtigerId provided
     let ownerSuffix = '';
-    if (options?.ownerVtigerId) {
-      const ownerRows = await db
-        .select({ firstName: vtigerUsers.firstName, lastName: vtigerUsers.lastName })
-        .from(vtigerUsers)
-        .where(eq(vtigerUsers.id, Number(options.ownerVtigerId)))
-        .limit(1);
-      if (ownerRows[0]) {
-        const o = ownerRows[0];
-        const name = [o.firstName, o.lastName].filter(Boolean).join('_') || '';
-        if (name) ownerSuffix = `_${name.replace(/[^a-zA-Z0-9ก-๙]/g, '_')}`;
-      }
+    if (options?.ownerVtigerId && requestId) {
+      const ownerAiUserId = await findOrCreateAiUser(Number(options.ownerVtigerId));
+      await db.update(aiQueryRequests)
+        .set({ userId: ownerAiUserId })
+        .where(eq(aiQueryRequests.id, requestId));
+      ownerSuffix = `_${String(options.ownerVtigerId)}`;
     }
 
     // 5. Upload CSV to WorkDrive AI Queries folder

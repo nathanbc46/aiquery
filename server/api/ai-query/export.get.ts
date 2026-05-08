@@ -1,8 +1,9 @@
 import { useDb } from '../../utils/db';
-import { aiQueryRequests, aiSettings, vtigerUsers } from '../../utils/schema';
+import { aiQueryRequests, aiSettings } from '../../utils/schema';
 import { eq, and, sql } from 'drizzle-orm';
 import { Parser } from '@json2csv/plainjs';
 import { DEFAULT_MAX_RESULTS_LIMIT } from '../../utils/constants';
+import { findOrCreateAiUser } from '../../utils/auth';
 
 export default defineEventHandler(async (event) => {
   const query = getQuery(event);
@@ -52,19 +53,12 @@ export default defineEventHandler(async (event) => {
       .set({ downloadCount: sql`download_count + 1` })
       .where(eq(aiQueryRequests.id, requestId));
 
-    // 4. Resolve owner name if provided
-    let ownerMeta = '';
+    // 4. Update user_id (owner) if ownerVtigerId provided
     if (ownerVtigerId) {
-      const ownerRows = await db
-        .select({ firstName: vtigerUsers.firstName, lastName: vtigerUsers.lastName, email1: vtigerUsers.email1 })
-        .from(vtigerUsers)
-        .where(eq(vtigerUsers.id, ownerVtigerId))
-        .limit(1);
-      if (ownerRows[0]) {
-        const o = ownerRows[0];
-        const name = [o.firstName, o.lastName].filter(Boolean).join(' ') || 'N/A';
-        ownerMeta = `# Owner: ${name}${o.email1 ? ` (${o.email1})` : ''}\n`;
-      }
+      const ownerAiUserId = await findOrCreateAiUser(ownerVtigerId);
+      await db.update(aiQueryRequests)
+        .set({ userId: ownerAiUserId })
+        .where(eq(aiQueryRequests.id, requestId));
     }
 
     // 5. Return as CSV file with UTF-8 BOM for Excel compatibility
@@ -76,7 +70,7 @@ export default defineEventHandler(async (event) => {
     setHeader(event, 'Content-Type', 'text/csv; charset=utf-8');
     setHeader(event, 'Content-Disposition', `attachment; filename="${fileName}"`);
 
-    return '﻿' + ownerMeta + csv;
+    return '﻿' + csv;
 
   } catch (error: any) {
     console.error('Export Error:', error);

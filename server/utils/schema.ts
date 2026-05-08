@@ -28,6 +28,7 @@ export const users = mysqlTable('ai_users', {
 export const aiQueryRequests = mysqlTable('ai_query_requests', {
   id: varchar('id', { length: 36 }).primaryKey(), // UUID
   userId: varchar('user_id', { length: 36 }).notNull().references(() => users.id),
+  createdBy: varchar('created_by', { length: 36 }).notNull().references(() => users.id),
   queryText: text('query_text').notNull(),
   generatedSql: text('generated_sql').notNull(),
   explanationTh: text('explanation_th').notNull(),
@@ -38,7 +39,6 @@ export const aiQueryRequests = mysqlTable('ai_query_requests', {
   managerId: varchar('manager_id', { length: 36 }).references(() => users.id),
   errorMessage: text('error_message'),
   managerComment: text('manager_comment'),
-  ownerDisplayName: varchar('owner_display_name', { length: 255 }),
   zohoLink: text('zoho_link'),
   zohoShareLink: text('zoho_share_link'),
   zohoSharePassword: varchar('zoho_share_password', { length: 255 }),

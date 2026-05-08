@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { 
+import { format } from 'sql-formatter'
+import {
   Inbox, 
   CheckCircle, 
   XCircle, 
@@ -50,12 +51,21 @@ onMounted(() => {
 // SQL Formatter & Highlighter Logic
 const formatSql = (sql: string) => {
   if (!sql) return ''
-  return sql
-    .replace(/\s+/g, ' ') // บีบช่องว่างที่เกินมา
-    .replace(/\b(SELECT|FROM|WHERE|INNER JOIN|LEFT JOIN|RIGHT JOIN|ORDER BY|GROUP BY|LIMIT|HAVING|VALUES|UPDATE|SET|INSERT INTO|DELETE FROM)\b/gi, '\n$1')
-    .replace(/\b(AND|OR|ON)\b/gi, '\n  $1')
-    .replace(/,\s*/g, ',\n  ')
-    .trim()
+  try {
+    return format(sql, {
+      language: 'mysql',
+      tabWidth: 2,
+      useTabs: false,
+      keywordCase: 'upper',
+      dataTypeCase: 'upper',
+      functionCase: 'upper',
+      indentStyle: 'standard',
+      logicalOperatorNewline: 'before',
+      expressionWidth: 60,
+    })
+  } catch {
+    return sql
+  }
 }
 
 const highlightSql = (sql: string) => {

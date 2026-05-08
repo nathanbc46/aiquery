@@ -1,7 +1,7 @@
 import { useDb } from '../../utils/db';
 import { aiQueryRequests, users } from '../../utils/schema';
-import { getAuthSession, requireAuthRole } from '../../utils/auth';
-import { eq, desc, count, like, or, and } from 'drizzle-orm';
+import { getAuthSession } from '../../utils/auth';
+import { eq, desc, count, like, or, and, inArray } from 'drizzle-orm';
 
 export default defineEventHandler(async (event) => {
   try {
@@ -26,7 +26,10 @@ export default defineEventHandler(async (event) => {
     // - ถ้ามีการค้นหา ให้ค้นหาใน queryText หรือ id
     const search = (query.search as string || '').trim();
     
-    let baseCondition = role === 'admin' ? undefined : eq(aiQueryRequests.userId, userId);
+    // non-admin เห็น record ที่ตัวเองเป็น owner (user_id) หรือเป็นผู้สร้าง (created_by)
+    let baseCondition = role === 'admin'
+      ? undefined
+      : or(eq(aiQueryRequests.userId, userId), eq(aiQueryRequests.createdBy, userId));
     let whereClause = baseCondition;
 
     if (search) {
@@ -46,17 +49,26 @@ export default defineEventHandler(async (event) => {
       .where(whereClause);
     const total = countResult[0]?.total ?? 0;
 
-    // 2. ดึงข้อมูลตาม page/limit พร้อมชื่อผู้ขอ
-    const results = await db.select({
-      request: aiQueryRequests,
-      userName: users.displayName
-    })
+    // 2. ดึงข้อมูลตาม page/limit
+    const rows = await db.select()
       .from(aiQueryRequests)
-      .leftJoin(users, eq(aiQueryRequests.userId, users.id))
       .where(whereClause)
       .orderBy(desc(aiQueryRequests.createdAt))
       .limit(limit)
       .offset(offset);
+
+    // 3. รวบรวม user ids ทั้งหมด แล้ว lookup ครั้งเดียว
+    const allUserIds = [...new Set(
+      rows.flatMap(r => [r.userId, r.createdBy]).filter(Boolean) as string[]
+    )];
+
+    const userList = allUserIds.length
+      ? await db.select({ id: users.id, displayName: users.displayName })
+          .from(users)
+          .where(inArray(users.id, allUserIds))
+      : [];
+
+    const userMap = Object.fromEntries(userList.map(u => [u.id, u.displayName]));
 
     return {
       success: true,
@@ -65,15 +77,16 @@ export default defineEventHandler(async (event) => {
         limit,
         total,
         totalPages: Math.ceil(total / limit),
-        hasMore: offset + results.length < total
+        hasMore: offset + rows.length < total
       },
-      requests: results.map(row => {
-        const req = row.request;
+      requests: rows.map(req => {
         const isExpired = req.expiresAt ? new Date() > new Date(req.expiresAt) : false;
+        const ownerName = userMap[req.userId] || 'Unknown User';
+        const creatorName = userMap[req.createdBy] || 'Unknown User';
         return {
           id: req.id,
-          user: row.userName || 'Unknown User',
-          ownerDisplayName: req.ownerDisplayName || null,
+          user: creatorName,
+          ownerName,
           query: req.queryText,
           sql: req.generatedSql,
           explanation: req.explanationTh,

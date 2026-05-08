@@ -6,7 +6,7 @@ import { or, eq } from 'drizzle-orm';
 
 export default defineEventHandler(async (event) => {
   const body = await readBody(event);
-  const { queryText, generatedSql, explanation, resultCount, requestReason, ownerDisplayName } = body;
+  const { queryText, generatedSql, explanation, resultCount, requestReason } = body;
 
   if (!queryText || !generatedSql) {
     throw createError({ statusCode: 400, statusMessage: 'Missing required fields' });
@@ -27,12 +27,12 @@ export default defineEventHandler(async (event) => {
     await db.insert(aiQueryRequests).values({
       id: requestId,
       userId: session.userId as string,
+      createdBy: session.userId as string,
       queryText: queryText,
       generatedSql: generatedSql,
       explanationTh: explanation,
       resultCount: resultCount || 0,
       requestReason: requestReason,
-      ownerDisplayName: ownerDisplayName || null,
       status: 'PENDING',
     });
 

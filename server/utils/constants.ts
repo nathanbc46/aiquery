@@ -1,7 +1,7 @@
 export const DEFAULT_MAX_RESULTS_LIMIT = 5000;
 
 export const SUGGESTED_QUERIES = [
-  "บริษัททั้งหมดที่อยู่ในกลุ่มอุตสาหกรรมไอที",
+  "leads ใน campaign 'Quotation - SolidWorks'",
 ];
 
 export const VALID_INDUSTRIES = "'Aerospace','Agricultural Machinery','Architecture','Automotive And Auto Parts','Banking - Finance And Securities - Insurance','Commerce','Construction Materials','Construction Services','Education','Electrical And Electronics','Energy And Utilities','Food And Beverage Processing','Government','Home And Office Products','Industrial Materials And Machine','IT And Telecommunication','Media And Publishing','Medical','Mining','Packaging','Personal Product','Petrochemicals And Chemicals','Professional Services','Property Development','Property Fund And Real Extate Investment Trusts','Steel - Job Shop - Metal','Tourisms And Leisure','Transportation And Logistics'";

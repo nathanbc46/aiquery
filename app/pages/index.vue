@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue'
+import { format } from 'sql-formatter'
 import { 
   Sparkles, 
   Search, 
@@ -18,7 +19,6 @@ import {
   Edit3,
   AlertTriangle,
   Copy,
-  HelpCircle,
   Mail,
   Star,
   Bookmark,
@@ -29,7 +29,8 @@ import {
   Loader2,
   LayoutGrid,
   Maximize2,
-  Minimize2
+  Minimize2,
+  CheckCircle2
 } from 'lucide-vue-next'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
@@ -45,7 +46,6 @@ const isCopied = ref(false)
 const isRefining = ref(false)
 const originalPrompt = ref('')
 const isSqlModalOpen = ref(false)
-const isGuideModalOpen = ref(false)
 const isDataGuideModalOpen = ref(false)
 const dataGuideContent = ref('')
 const isLoadingDataGuide = ref(false)
@@ -85,6 +85,10 @@ const favoriteTitle = ref('')
 // CSV download confirmation modal
 const isCsvConfirmModalOpen = ref(false)
 const csvFilename = ref('')
+const csvSuccessDone = ref(false)
+
+// Zoho success state
+const zohoSuccessDone = ref(false)
 
 const openCsvModal = () => {
   const today = new Date().toISOString().slice(0, 10).replace(/-/g, '')
@@ -300,7 +304,6 @@ const handleZohoExport = async () => {
         explanation: generatedResult.value.explanation,
         resultCount: generatedResult.value.previewCount,
         requestReason: 'Export to Zoho WorkDrive',
-        ownerDisplayName: zohoOwnerVtigerId.value ? getOwnerLabel(zohoOwnerVtigerId.value) : null
       }
     })
 
@@ -320,8 +323,7 @@ const handleZohoExport = async () => {
     })
 
     if (response.success) {
-      toast.success('สำเร็จ', 'อัพโหลดไฟล์ไปยัง Zoho WorkDrive เรียบร้อยแล้ว')
-      isZohoModalOpen.value = false
+      zohoSuccessDone.value = true
       zohoOptions.value.linkName = ''
       prompt.value = ''
       requestReason.value = ''
@@ -457,7 +459,7 @@ const generateSql = async () => {
   }
 }
 
-const requestApproval = async (ownerDisplayName?: string) => {
+const requestApproval = async () => {
   if (!generatedResult.value) return
 
   isRequesting.value = true
@@ -470,27 +472,28 @@ const requestApproval = async (ownerDisplayName?: string) => {
         explanation: generatedResult.value.explanation,
         resultCount: generatedResult.value.previewCount,
         requestReason: requestReason.value,
-        ownerDisplayName: ownerDisplayName || null
       }
     })
     
     if (response.success) {
       if (response.autoApproved) {
-        toast.success('อนุมัติอัตโนมัติสำเร็จ', 'เนื่องจากคุณมีสิทธิ์ Manager ระบบจึงอนุมัติและเตรียมข้อมูลให้ทันที!')
-        
-        // ถ้าเป็น Admin ให้เริ่มดาวน์โหลดไฟล์ทันที (ใช้ window.location เพื่อไม่ให้เปิด Tab ใหม่)
+        // เริ่มดาวน์โหลดไฟล์ทันที (สำหรับ Admin)
         if (isAdmin.value && response.requestId) {
           const fn = (csvFilename.value || 'AI_Export').replace(/[^a-zA-Z0-9ก-๙\s_-]/g, '').trim().replace(/\s+/g, '_') || 'AI_Export'
           const ownerParam = csvOwnerVtigerId.value ? `&ownerVtigerId=${csvOwnerVtigerId.value}` : ''
           window.location.href = `/api/ai-query/export?id=${response.requestId}&filename=${encodeURIComponent(fn)}${ownerParam}`
         }
+        // แสดง success state ใน modal แทนการปิดทันที
+        csvSuccessDone.value = true
+        isRequestModalOpen.value = false
       } else {
         toast.success('ส่งคำขอสำเร็จ', 'ส่งคำขออนุมัติไปยังหัวหน้างานเรียบร้อยแล้ว!')
+        isCsvConfirmModalOpen.value = false
+        isRequestModalOpen.value = false
+        prompt.value = ''
+        requestReason.value = ''
+        generatedResult.value = null
       }
-      isRequestModalOpen.value = false
-      prompt.value = ''
-      requestReason.value = ''
-      generatedResult.value = null
     } else {
       toast.error('ส่งคำขอไม่สำเร็จ', 'โปรดตรวจสอบการเชื่อมต่อ Database หรือติดต่อ Admin')
     }
@@ -594,27 +597,21 @@ const updateSql = async () => {
 // SQL Formatter & Highlighter Logic (From approvals.vue)
 const formatSql = (sqlStr: string) => {
   if (!sqlStr) return ''
-  
-  // 1. แยก String Literals ออกมาเก็บไว้ก่อนเพื่อความปลอดภัย (ป้องกันข้อมูลพัง)
-  const strings: string[] = []
-  let placeholderSql = sqlStr.replace(/'((?:''|[^'])*)'/g, (match) => {
-    strings.push(match)
-    return `__SQL_STR_${strings.length - 1}__`
-  })
-  
-  // 2. จัดรูปแบบส่วนที่เป็นคำสั่ง SQL (ยุบช่องว่างที่เกินมา และขึ้นบรรทัดใหม่ที่ Keyword หลัก)
-  let formatted = placeholderSql
-    .replace(/\s+/g, ' ') // ยุบช่องว่างและตัวขึ้นบรรทัดใหม่เดิมทิ้งทั้งหมดก่อน
-    .replace(/\b(SELECT|FROM|WHERE|INNER JOIN|LEFT JOIN|RIGHT JOIN|ORDER BY|GROUP BY|LIMIT|HAVING|VALUES|UPDATE|SET|INSERT INTO|DELETE FROM)\b/gi, '\n$1')
-    .replace(/\b(AND|OR|ON)\b/gi, '\n  $1') // ตอนนี้ทำได้ปลอดภัยแล้วเพราะแยก String ออกไปแล้ว
-    .trim()
-    
-  // 3. นำ String Literals กลับมาใส่ที่เดิม
-  strings.forEach((originalStr, i) => {
-    formatted = formatted.replace(`__SQL_STR_${i}__`, originalStr)
-  })
-  
-  return formatted
+  try {
+    return format(sqlStr, {
+      language: 'mysql',
+      tabWidth: 2,
+      useTabs: false,
+      keywordCase: 'upper',
+      dataTypeCase: 'upper',
+      functionCase: 'upper',
+      indentStyle: 'standard',
+      logicalOperatorNewline: 'before',
+      expressionWidth: 60,
+    })
+  } catch {
+    return sqlStr
+  }
 }
 
 const highlightSql = (sqlStr: string) => {
@@ -655,14 +652,7 @@ const highlightSql = (sqlStr: string) => {
             <Sparkles class="w-3.5 h-3.5 animate-pulse" />
             AI SQL ENGINE PRO
           </div>
-          <button 
-            @click="isGuideModalOpen = true"
-            class="group flex items-center gap-2 px-3 py-1 rounded-xl bg-amber-50/50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 text-[10px] font-black uppercase tracking-[0.2em] border border-amber-100/50 dark:border-amber-800/50 shadow-sm backdrop-blur-md hover:bg-amber-100 dark:hover:bg-amber-900/40 transition-all active:scale-95"
-          >
-            <HelpCircle class="w-3.5 h-3.5 group-hover:rotate-12 transition-transform" />
-            คู่มือการใช้งาน
-          </button>
-          <button 
+          <button
             @click="fetchDataGuide"
             class="group flex items-center gap-2 px-3 py-1 rounded-xl bg-indigo-50/50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 text-[10px] font-black uppercase tracking-[0.2em] border border-indigo-100/50 dark:border-indigo-800/50 shadow-sm backdrop-blur-md hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-all active:scale-95"
           >
@@ -1217,273 +1207,6 @@ const highlightSql = (sqlStr: string) => {
       </Teleport>
     </ClientOnly>
 
-    <!-- Guide Modal -->
-    <ClientOnly>
-      <Teleport to="body">
-        <transition name="modal">
-          <div v-if="isGuideModalOpen" class="fixed inset-0 z-[120] flex items-center justify-center p-4 md:p-6 bg-slate-900/90 backdrop-blur-md" @click="isGuideModalOpen = false">
-            <div class="bg-white dark:bg-slate-900 rounded-[2.5rem] md:rounded-[3.5rem] shadow-2xl w-full max-w-5xl overflow-hidden border border-slate-200 dark:border-slate-800 animate-in zoom-in-95 duration-300 flex flex-col max-h-[90vh]" @click.stop>
-              <!-- Modal Header -->
-              <div class="px-8 md:px-12 py-8 md:py-10 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center bg-amber-50/40 dark:bg-amber-900/10 shrink-0">
-                <div class="flex items-center gap-5">
-                  <div class="w-14 h-14 rounded-[1.25rem] bg-amber-100 dark:bg-amber-900/40 flex items-center justify-center text-amber-600 dark:text-amber-400 shadow-inner">
-                    <HelpCircle class="w-8 h-8" />
-                  </div>
-                  <div>
-                    <h3 class="text-2xl font-black text-slate-900 dark:text-white tracking-tight">คู่มือการใช้งานระบบ AI Query</h3>
-                    <div class="flex items-center gap-2 mt-1">
-                      <span class="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span>
-                      <p class="text-[11px] font-black text-amber-600/80 dark:text-amber-400/80 uppercase tracking-[0.3em]">Vtiger CRM Intelligence Engine v2.0</p>
-                    </div>
-                  </div>
-                </div>
-                <button @click="isGuideModalOpen = false" class="text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 transition-all p-3 rounded-2xl hover:bg-white dark:hover:bg-slate-800 shadow-sm border border-transparent hover:border-slate-100 dark:hover:border-slate-700">
-                  <X class="w-7 h-7" />
-                </button>
-              </div>
-              
-              <!-- Modal Body (Scrollable) -->
-              <div class="p-8 md:p-12 overflow-y-auto custom-scrollbar space-y-16">
-                
-                <!-- Section 1: Topics & Examples -->
-                <section class="space-y-10">
-                  <div class="flex flex-col gap-2">
-                    <div class="flex items-center gap-3">
-                      <div class="w-10 h-1 text-amber-500 bg-amber-500 rounded-full"></div>
-                      <h4 class="text-xl font-black text-slate-900 dark:text-white uppercase tracking-tight">1. หัวข้อที่ผู้ใช้งานสามารถถามได้</h4>
-                    </div>
-                    <p class="text-slate-500 dark:text-slate-400 text-sm font-medium ml-13">ระบบรองรับการดึงข้อมูลจากโมดูลหลักและตารางปรับแต่งพิเศษ โดยครอบคลุมหัวข้อดังนี้:</p>
-                  </div>
-
-                  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    <!-- Accounts & Contacts -->
-                    <div class="group p-6 rounded-[2rem] bg-slate-50 dark:bg-slate-950 border border-slate-100 dark:border-slate-800 hover:border-blue-200 dark:hover:border-blue-900 transition-all">
-                      <div class="w-12 h-12 rounded-2xl bg-blue-500/10 flex items-center justify-center text-blue-600 mb-5 group-hover:scale-110 transition-transform">
-                        <Database class="w-6 h-6" />
-                      </div>
-                      <h5 class="font-black text-slate-900 dark:text-white mb-3">ลูกค้าและผู้ติดต่อ</h5>
-                      <ul class="space-y-2.5">
-                        <li class="text-[11px] text-slate-500 dark:text-slate-400 flex gap-2 italic">
-                          <span class="text-blue-500 font-bold">"</span>รายชื่อลูกค้าในกลุ่มอุตสาหกรรม Healthcare<span class="text-blue-500 font-bold">"</span>
-                        </li>
-                        <li class="text-[11px] text-slate-500 dark:text-slate-400 flex gap-2 italic">
-                          <span class="text-blue-500 font-bold">"</span>ขอเบอร์ติดต่อคุณสมชาย บริษัท ABC<span class="text-blue-500 font-bold">"</span>
-                        </li>
-                        <li class="text-[11px] text-slate-500 dark:text-slate-400 flex gap-2 italic">
-                          <span class="text-blue-500 font-bold">"</span>นับจำนวนลูกค้าแยกตามจังหวัด<span class="text-blue-500 font-bold">"</span>
-                        </li>
-                      </ul>
-                    </div>
-
-                    <!-- Opportunities -->
-                    <div class="group p-6 rounded-[2rem] bg-slate-50 dark:bg-slate-950 border border-slate-100 dark:border-slate-800 hover:border-amber-200 dark:hover:border-amber-900 transition-all">
-                      <div class="w-12 h-12 rounded-2xl bg-amber-500/10 flex items-center justify-center text-amber-600 mb-5 group-hover:scale-110 transition-transform">
-                        <Sparkles class="w-6 h-6" />
-                      </div>
-                      <h5 class="font-black text-slate-900 dark:text-white mb-3">โอกาสทางการขาย</h5>
-                      <ul class="space-y-2.5">
-                        <li class="text-[11px] text-slate-500 dark:text-slate-400 flex gap-2 italic">
-                          <span class="text-amber-500 font-bold">"</span>สรุปดีลที่ปิดการขายได้ในเดือนนี้<span class="text-amber-500 font-bold">"</span>
-                        </li>
-                        <li class="text-[11px] text-slate-500 dark:text-slate-400 flex gap-2 italic">
-                          <span class="text-amber-500 font-bold">"</span>ยอดรวมดีลจากแคมเปญ Motor Show<span class="text-amber-500 font-bold">"</span>
-                        </li>
-                        <li class="text-[11px] text-slate-500 dark:text-slate-400 flex gap-2 italic">
-                          <span class="text-amber-500 font-bold">"</span>Opp ที่อยู่ในทีมฝ่ายขายภาคกลาง<span class="text-amber-500 font-bold">"</span>
-                        </li>
-                      </ul>
-                    </div>
-
-                    <!-- Leads -->
-                    <div class="group p-6 rounded-[2rem] bg-slate-50 dark:bg-slate-950 border border-slate-100 dark:border-slate-800 hover:border-indigo-200 dark:hover:border-indigo-900 transition-all">
-                      <div class="w-12 h-12 rounded-2xl bg-indigo-500/10 flex items-center justify-center text-indigo-600 mb-5 group-hover:scale-110 transition-transform">
-                        <ArrowRight class="w-6 h-6" />
-                      </div>
-                      <h5 class="font-black text-slate-900 dark:text-white mb-3">Leads & Conversion</h5>
-                      <ul class="space-y-2.5">
-                        <li class="text-[11px] text-slate-500 dark:text-slate-400 flex gap-2 italic">
-                          <span class="text-indigo-500 font-bold">"</span>Lead ใหม่จาก Facebook ในสัปดาห์นี้<span class="text-indigo-500 font-bold">"</span>
-                        </li>
-                        <li class="text-[11px] text-slate-500 dark:text-slate-400 flex gap-2 italic">
-                          <span class="text-indigo-500 font-bold">"</span>มูลค่ารวมของ Lead ที่ถูก Convert แล้ว<span class="text-indigo-500 font-bold">"</span>
-                        </li>
-                        <li class="text-[11px] text-slate-500 dark:text-slate-400 flex gap-2 italic">
-                          <span class="text-indigo-500 font-bold">"</span>Lead ตำแหน่ง Manager ที่ยังไม่ถูกติดต่อ<span class="text-indigo-500 font-bold">"</span>
-                        </li>
-                      </ul>
-                    </div>
-
-                    <!-- Assets -->
-                    <div class="group p-6 rounded-[2rem] bg-slate-50 dark:bg-slate-950 border border-slate-100 dark:border-slate-800 hover:border-emerald-200 dark:hover:border-emerald-900 transition-all">
-                      <div class="w-12 h-12 rounded-2xl bg-emerald-500/10 flex items-center justify-center text-emerald-600 mb-5 group-hover:scale-110 transition-transform">
-                        <Terminal class="w-6 h-6" />
-                      </div>
-                      <h5 class="font-black text-slate-900 dark:text-white mb-3">ทรัพย์สินและ SN</h5>
-                      <ul class="space-y-2.5">
-                        <li class="text-[11px] text-slate-500 dark:text-slate-400 flex gap-2 italic">
-                          <span class="text-emerald-500 font-bold">"</span>บริษัท XYZ มี SN ใช้งานอยู่กี่รายการ<span class="text-emerald-500 font-bold">"</span>
-                        </li>
-                        <li class="text-[11px] text-slate-500 dark:text-slate-400 flex gap-2 italic">
-                          <span class="text-emerald-500 font-bold">"</span>สินค้าที่ประกันจะหมดอายุใน 30 วัน<span class="text-emerald-500 font-bold">"</span>
-                        </li>
-                        <li class="text-[11px] text-slate-500 dark:text-slate-400 flex gap-2 italic">
-                          <span class="text-emerald-500 font-bold">"</span>SN นี้ซื้อมาจากใบสั่งขายเลขที่เท่าไหร่<span class="text-emerald-500 font-bold">"</span>
-                        </li>
-                      </ul>
-                    </div>
-
-                    <!-- Sales -->
-                    <div class="group p-6 rounded-[2rem] bg-slate-50 dark:bg-slate-950 border border-slate-100 dark:border-slate-800 hover:border-rose-200 dark:hover:border-rose-900 transition-all">
-                      <div class="w-12 h-12 rounded-2xl bg-rose-500/10 flex items-center justify-center text-rose-600 mb-5 group-hover:scale-110 transition-transform">
-                        <Copy class="w-6 h-6" />
-                      </div>
-                      <h5 class="font-black text-slate-900 dark:text-white mb-3">งานขายและใบเสนอราคา</h5>
-                      <ul class="space-y-2.5">
-                        <li class="text-[11px] text-slate-500 dark:text-slate-400 flex gap-2 italic">
-                          <span class="text-rose-500 font-bold">"</span>สรุปยอดขายรวมรายเดือนในปีนี้<span class="text-rose-500 font-bold">"</span>
-                        </li>
-                        <li class="text-[11px] text-slate-500 dark:text-slate-400 flex gap-2 italic">
-                          <span class="text-rose-500 font-bold">"</span>รายการสินค้าในใบเสนอราคาที่ลูกค้าตกลง<span class="text-rose-500 font-bold">"</span>
-                        </li>
-                        <li class="text-[11px] text-slate-500 dark:text-slate-400 flex gap-2 italic">
-                          <span class="text-rose-500 font-bold">"</span>แคมเปญไหนสร้างยอดขายได้มากที่สุด<span class="text-rose-500 font-bold">"</span>
-                        </li>
-                      </ul>
-                    </div>
-                  </div>
-                </section>
-
-                <!-- Section 2: AI Logic -->
-                <section class="space-y-8 p-10 rounded-[3rem] bg-slate-900 text-white relative overflow-hidden shadow-2xl">
-                  <div class="absolute top-0 right-0 p-10 opacity-10">
-                    <BrainCircuit class="w-64 h-64" />
-                  </div>
-                  <div class="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-10">
-                    <div class="max-w-md space-y-4">
-                      <h4 class="text-2xl font-black uppercase tracking-tight">2. AI ทำงานอย่างไร?</h4>
-                      <p class="text-slate-400 text-sm leading-relaxed font-medium">ทุกครั้งที่คุณถาม AI จะประมวลผลผ่าน 4 ขั้นตอนหลักเพื่อให้ได้ชุดคำสั่งที่แม่นยำและปลอดภัยที่สุด</p>
-                    </div>
-                    <div class="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-6">
-                      <div class="space-y-2">
-                        <div class="flex items-center gap-3">
-                          <span class="w-7 h-7 rounded-lg bg-blue-500/20 text-blue-400 flex items-center justify-center font-black text-xs border border-blue-500/30">1</span>
-                          <span class="font-bold text-sm">วิเคราะห์ความตั้งใจ</span>
-                        </div>
-                        <p class="text-[10px] text-slate-500 ml-10">ระบุโมดูลที่เกี่ยวข้อง (เช่น Accounts, Leads, หรือ Assets)</p>
-                      </div>
-                      <div class="space-y-2">
-                        <div class="flex items-center gap-3">
-                          <span class="w-7 h-7 rounded-lg bg-blue-500/20 text-blue-400 flex items-center justify-center font-black text-xs border border-blue-500/30">2</span>
-                          <span class="font-bold text-sm">เชื่อมโยงตารางอัตโนมัติ</span>
-                        </div>
-                        <p class="text-[10px] text-slate-500 ml-10">JOIN ตารางที่จำเป็นและกรองข้อมูลที่ถูกลบ (deleted=0)</p>
-                      </div>
-                      <div class="space-y-2">
-                        <div class="flex items-center gap-3">
-                          <span class="w-7 h-7 rounded-lg bg-blue-500/20 text-blue-400 flex items-center justify-center font-black text-xs border border-blue-500/30">3</span>
-                          <span class="font-bold text-sm">กรองข้อมูลด้วยเงื่อนไข</span>
-                        </div>
-                        <p class="text-[10px] text-slate-500 ml-10">แปลงภาษาคน (เช่น "เดือนนี้") ให้เป็นเงื่อนไข SQL WHERE</p>
-                      </div>
-                      <div class="space-y-2">
-                        <div class="flex items-center gap-3">
-                          <span class="w-7 h-7 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-black text-xs border border-emerald-500/30">4</span>
-                          <span class="font-bold text-sm">ตรวจสอบความปลอดภัย</span>
-                        </div>
-                        <p class="text-[10px] text-slate-500 ml-10">อนุญาตเฉพาะคำสั่ง SELECT (Read-only) เท่านั้น</p>
-                      </div>
-                    </div>
-                  </div>
-                </section>
-
-                <!-- Section 3: Best Practices -->
-                <section class="space-y-10">
-                  <div class="flex items-center gap-3">
-                    <div class="w-10 h-1 bg-emerald-500 rounded-full"></div>
-                    <h4 class="text-xl font-black text-slate-900 dark:text-white uppercase tracking-tight">3. เทคนิคการตั้งคำถามให้ AI ตรงใจ</h4>
-                  </div>
-                  
-                  <div class="grid grid-cols-1 md:grid-cols-2 gap-10">
-                    <!-- Do's -->
-                    <div class="space-y-6">
-                      <h5 class="flex items-center gap-2 text-emerald-600 font-black uppercase tracking-widest text-xs">
-                        <div class="w-6 h-6 rounded-lg bg-emerald-500 text-white flex items-center justify-center">✓</div>
-                        สิ่งที่ควรทำ (Do's)
-                      </h5>
-                      <div class="space-y-4">
-                        <div class="p-6 rounded-3xl bg-emerald-50/30 dark:bg-emerald-900/10 border border-emerald-100 dark:border-emerald-900/30 space-y-3">
-                          <p class="text-xs font-bold text-emerald-900 dark:text-emerald-300">ระบุชื่อเฉพาะที่ชัดเจน</p>
-                          <div class="flex flex-col gap-2">
-                            <p class="text-[11px] text-emerald-700 dark:text-emerald-400">✅ "ขอรายการสินค้าของบริษัท <b>ABC จำกัด</b>"</p>
-                            <p class="text-[11px] text-slate-400 line-through">❌ "ขอดูของบริษัทนั้นหน่อย"</p>
-                          </div>
-                        </div>
-                        <div class="p-6 rounded-3xl bg-emerald-50/30 dark:bg-emerald-900/10 border border-emerald-100 dark:border-emerald-900/30 space-y-3">
-                          <p class="text-xs font-bold text-emerald-900 dark:text-emerald-300">ระบุช่วงเวลาให้ชัดเจน</p>
-                          <div class="flex flex-col gap-2">
-                            <p class="text-[11px] text-emerald-700 dark:text-emerald-400">✅ "สรุปยอดขายระหว่าง <b>1 ม.ค. ถึง 31 มี.ค. 2024</b>"</p>
-                            <p class="text-[11px] text-slate-400 line-through">❌ "สรุปยอดขายช่วงที่ผ่านมา"</p>
-                          </div>
-                        </div>
-                        <div class="p-6 rounded-3xl bg-emerald-50/30 dark:bg-emerald-900/10 border border-emerald-100 dark:border-emerald-900/30 space-y-3">
-                          <p class="text-xs font-bold text-emerald-900 dark:text-emerald-300">ระบุสถานะข้อมูล</p>
-                          <div class="flex flex-col gap-2">
-                            <p class="text-[11px] text-emerald-700 dark:text-emerald-400">✅ "เอาเฉพาะ Lead ที่สถานะเป็น <b>'Hot'</b>"</p>
-                            <p class="text-[11px] text-slate-400 line-through">❌ "เอา Lead ที่น่าสนใจ"</p>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    <!-- Don'ts -->
-                    <div class="space-y-6">
-                      <h5 class="flex items-center gap-2 text-rose-600 font-black uppercase tracking-widest text-xs">
-                        <div class="w-6 h-6 rounded-lg bg-rose-500 text-white flex items-center justify-center">✕</div>
-                        ควรหลีกเลี่ยง (Don'ts)
-                      </h5>
-                      <div class="space-y-4">
-                        <div class="p-6 rounded-3xl bg-rose-50/30 dark:bg-rose-900/10 border border-rose-100 dark:border-rose-900/30 space-y-2">
-                          <p class="text-xs font-bold text-rose-900 dark:text-rose-300">หลีกเลี่ยงคำที่กำกวม</p>
-                          <p class="text-[11px] text-rose-700/70 dark:text-rose-400/70">คำว่า "อันที่เยอะที่สุด" ควรเปลี่ยนเป็น "มูลค่ามากที่สุด" หรือ "จำนวนมากที่สุด"</p>
-                        </div>
-                        <div class="p-6 rounded-3xl bg-rose-50/30 dark:bg-rose-900/10 border border-rose-100 dark:border-rose-900/30 space-y-2">
-                          <p class="text-xs font-bold text-rose-900 dark:text-rose-300">หลีกเลี่ยงการถามซ้อนกันเกินไป</p>
-                          <p class="text-[11px] text-rose-700/70 dark:text-rose-400/70">หากคำถามซับซ้อนมาก ให้ลองแบ่งเป็น 2 คำถามย่อยจะช่วยให้ AI แม่นยำขึ้น</p>
-                        </div>
-                        <div class="p-6 rounded-3xl bg-amber-50/50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-900/30 space-y-2">
-                          <div class="flex items-center gap-2 mb-1">
-                            <Wand2 class="w-4 h-4 text-amber-500" />
-                            <p class="text-xs font-black text-amber-900 dark:text-amber-200 uppercase tracking-widest">เคล็ดลับเด็ด</p>
-                          </div>
-                          <p class="text-[11px] text-amber-800 dark:text-amber-400 leading-relaxed">หากต้องการจัดกลุ่มข้อมูล ให้ลงท้ายว่า <b>"แยกตาม..."</b> เช่น "นับจำนวน Lead แยกตามจังหวัด" AI จะสร้างคำสั่ง GROUP BY ให้ทันที!</p>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </section>
-              </div>
-              
-              <!-- Modal Footer -->
-              <div class="px-8 md:px-12 py-8 bg-slate-50 dark:bg-slate-950 border-t border-slate-100 dark:border-slate-800 flex flex-col md:flex-row justify-between items-center gap-6 shrink-0">
-                <div class="flex items-center gap-4">
-                  <div class="w-10 h-10 rounded-xl bg-white dark:bg-slate-900 flex items-center justify-center border border-slate-200 dark:border-slate-800 shadow-sm">
-                    <ShieldCheck class="w-5 h-5 text-emerald-500" />
-                  </div>
-                  <p class="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest">ความปลอดภัยเป็นที่หนึ่ง: ชุดคำสั่งทั้งหมดถูกตรวจสอบสิทธิ์แบบ Read-only</p>
-                </div>
-                <button 
-                  @click="isGuideModalOpen = false"
-                  class="w-full md:w-auto px-16 py-5 bg-gradient-to-r from-slate-900 to-slate-800 dark:from-blue-600 dark:to-indigo-600 text-white font-black rounded-3xl hover:scale-105 transition-all active:scale-95 uppercase tracking-widest text-sm shadow-xl shadow-blue-500/20"
-                >
-                  เข้าใจแล้ว เริ่มใช้งานเลย
-                </button>
-              </div>
-            </div>
-          </div>
-        </transition>
-      </Teleport>
-    </ClientOnly>
-
     <!-- SQL Viewer Modal -->
 
     <ClientOnly>
@@ -1677,13 +1400,30 @@ const highlightSql = (sqlStr: string) => {
                     zoho_sheet
                   </div>
                 </div>
-                <button @click="isZohoModalOpen = false" class="p-2 hover:bg-slate-100 dark:hover:bg-white/5 rounded-full transition-colors text-slate-400 dark:text-white/50">
+                <button @click="isZohoModalOpen = false; zohoSuccessDone = false" class="p-2 hover:bg-slate-100 dark:hover:bg-white/5 rounded-full transition-colors text-slate-400 dark:text-white/50">
                   <X class="w-5 h-5" />
                 </button>
               </div>
 
+              <!-- Zoho Success State -->
+              <div v-if="zohoSuccessDone" class="p-10 flex flex-col items-center text-center gap-5">
+                <div class="w-16 h-16 rounded-full bg-emerald-100 dark:bg-emerald-500/20 flex items-center justify-center">
+                  <CheckCircle2 class="w-8 h-8 text-emerald-600 dark:text-emerald-400" />
+                </div>
+                <div class="space-y-1.5">
+                  <p class="text-base font-black text-slate-900 dark:text-white">อัพโหลดสำเร็จ!</p>
+                  <p class="text-sm text-slate-500 dark:text-slate-400 leading-relaxed">ระบบอนุมัติคำขอนี้อัตโนมัติ<br>บันทึกลงประวัติการใช้งานและอัพโหลดไปยัง Zoho WorkDrive เรียบร้อยแล้ว</p>
+                </div>
+                <button
+                  @click="isZohoModalOpen = false; zohoSuccessDone = false; generatedResult = null"
+                  class="px-8 py-3 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold rounded-xl transition-all"
+                >
+                  ปิด
+                </button>
+              </div>
+
               <!-- Content -->
-              <div class="p-8 space-y-6 overflow-y-auto max-h-[70vh]">
+              <div v-if="!zohoSuccessDone" class="p-8 space-y-6 overflow-y-auto max-h-[70vh]">
                 <!-- File Name -->
                 <div>
                   <label class="text-xs font-bold text-slate-500 dark:text-white/40 uppercase tracking-widest mb-2 block">ชื่อไฟล์</label>
@@ -1693,7 +1433,7 @@ const highlightSql = (sqlStr: string) => {
                     placeholder="เช่น Sales_Report, Customer_List"
                     class="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl px-4 py-3 text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-white/20 outline-none focus:border-emerald-500/50 transition-all"
                   />
-                  <p class="text-[11px] text-slate-400 dark:text-white/30 mt-1.5">ไฟล์จะถูกบันทึกเป็น <span class="font-mono">{{ (zohoOptions.linkName || 'AI_Export').replace(/[^a-zA-Z0-9ก-๙]/g, '_') }}_[timestamp].xlsx</span></p>
+                  <p class="text-[11px] text-slate-400 dark:text-white/30 mt-1.5">ไฟล์จะถูกบันทึกเป็น <span class="font-mono">{{ (zohoOptions.linkName || 'AI_Export').replace(/[^a-zA-Z0-9ก-๙]/g, '_') }}_[timestamp].csv</span></p>
                 </div>
 
                 <!-- User Owner -->
@@ -1737,7 +1477,7 @@ const highlightSql = (sqlStr: string) => {
                 <!-- Info Box -->
                 <div class="bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-100 dark:border-emerald-500/20 rounded-xl p-4">
                   <ul class="space-y-2 text-xs text-emerald-700 dark:text-emerald-300/80 list-disc pl-4">
-                    <li>ไฟล์จะถูกอัพโหลดเป็น <strong>.xlsx</strong> ไปยัง Zoho WorkDrive โฟลเดอร์ <strong>AI Queries</strong></li>
+                    <li>ไฟล์จะถูกอัพโหลดเป็น <strong>.csv</strong> ไปยัง Zoho WorkDrive โฟลเดอร์ <strong>AI Queries</strong></li>
                     <li>สามารถเปิดและแก้ไขได้ใน Zoho Sheet</li>
                     <li>หากต้องการแชร์ link ให้ผู้อื่น สามารถสร้าง External Share Link ได้จาก WorkDrive UI</li>
                   </ul>
@@ -1745,8 +1485,8 @@ const highlightSql = (sqlStr: string) => {
               </div>
 
               <!-- Footer -->
-              <div class="p-6 flex items-center justify-end gap-3 bg-slate-50 dark:bg-white/[0.02]">
-                <button @click="isZohoModalOpen = false" class="px-7 py-3.5 text-sm font-bold text-slate-500 dark:text-white/50 hover:bg-slate-100 dark:hover:bg-white/5 rounded-xl transition-all border border-slate-200 dark:border-white/10">
+              <div v-if="!zohoSuccessDone" class="p-6 flex items-center justify-end gap-3 bg-slate-50 dark:bg-white/[0.02]">
+                <button @click="isZohoModalOpen = false; zohoSuccessDone = false" class="px-7 py-3.5 text-sm font-bold text-slate-500 dark:text-white/50 hover:bg-slate-100 dark:hover:bg-white/5 rounded-xl transition-all border border-slate-200 dark:border-white/10">
                   Cancel
                 </button>
                 <button
@@ -1847,13 +1587,30 @@ const highlightSql = (sqlStr: string) => {
                     CSV
                   </div>
                 </div>
-                <button @click="isCsvConfirmModalOpen = false" class="p-2 hover:bg-slate-100 dark:hover:bg-white/5 rounded-full transition-colors text-slate-400 dark:text-white/50">
+                <button @click="isCsvConfirmModalOpen = false; csvSuccessDone = false" class="p-2 hover:bg-slate-100 dark:hover:bg-white/5 rounded-full transition-colors text-slate-400 dark:text-white/50">
                   <X class="w-5 h-5" />
                 </button>
               </div>
 
+              <!-- Success State -->
+              <div v-if="csvSuccessDone" class="p-10 flex flex-col items-center text-center gap-5">
+                <div class="w-16 h-16 rounded-full bg-emerald-100 dark:bg-emerald-500/20 flex items-center justify-center">
+                  <CheckCircle2 class="w-8 h-8 text-emerald-600 dark:text-emerald-400" />
+                </div>
+                <div class="space-y-1.5">
+                  <p class="text-base font-black text-slate-900 dark:text-white">ดำเนินการสำเร็จ!</p>
+                  <p class="text-sm text-slate-500 dark:text-slate-400 leading-relaxed">ระบบอนุมัติคำขอนี้อัตโนมัติ<br>บันทึกลงประวัติการใช้งานเรียบร้อยแล้ว</p>
+                </div>
+                <button
+                  @click="isCsvConfirmModalOpen = false; csvSuccessDone = false; prompt = ''; requestReason = ''; generatedResult = null"
+                  class="px-8 py-3 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold rounded-xl transition-all"
+                >
+                  ปิด
+                </button>
+              </div>
+
               <!-- Content -->
-              <div class="p-8 space-y-6">
+              <div v-if="!csvSuccessDone" class="p-8 space-y-6">
                 <!-- File Name Input -->
                 <div>
                   <label class="text-xs font-bold text-slate-500 dark:text-white/40 uppercase tracking-widest mb-2 block">ชื่อไฟล์</label>
@@ -1919,15 +1676,15 @@ const highlightSql = (sqlStr: string) => {
               </div>
 
               <!-- Footer -->
-              <div class="p-6 flex items-center justify-end gap-3 bg-slate-50 dark:bg-white/[0.02]">
+              <div v-if="!csvSuccessDone" class="p-6 flex items-center justify-end gap-3 bg-slate-50 dark:bg-white/[0.02]">
                 <button
-                  @click="isCsvConfirmModalOpen = false"
+                  @click="isCsvConfirmModalOpen = false; csvSuccessDone = false"
                   class="px-7 py-3.5 text-sm font-bold text-slate-500 dark:text-white/50 hover:bg-slate-100 dark:hover:bg-white/5 rounded-xl transition-all border border-slate-200 dark:border-white/10"
                 >
                   ยกเลิก
                 </button>
                 <button
-                  @click="isCsvConfirmModalOpen = false; requestApproval(csvOwnerVtigerId ? getOwnerLabel(csvOwnerVtigerId) : undefined)"
+                  @click="requestApproval()"
                   :disabled="isRequesting"
                   class="px-8 py-3.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-sm font-bold text-white rounded-xl transition-all shadow-lg shadow-emerald-500/20 flex items-center gap-2"
                 >

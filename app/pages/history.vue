@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
-import mermaid from 'mermaid'
+import { format } from 'sql-formatter'
+import ApexCharts from 'apexcharts'
 import { 
   History, 
   Clock, 
@@ -176,34 +177,71 @@ const openSqlModal = (sql: string, explanation: string) => {
 
 const formatSql = (sql: string) => {
   if (!sql) return ''
-  return sql
-    .replace(/\s+/g, ' ') // บีบช่องว่างที่เกินมา
-    .replace(/\b(SELECT|FROM|WHERE|INNER JOIN|LEFT JOIN|RIGHT JOIN|ORDER BY|GROUP BY|LIMIT|HAVING|VALUES|UPDATE|SET|INSERT INTO|DELETE FROM)\b/gi, '\n$1')
-    .replace(/\b(AND|OR|ON)\b/gi, '\n  $1')
-    .replace(/,\s*/g, ',\n  ')
-    .trim()
+  try {
+    return format(sql, {
+      language: 'mysql',
+      tabWidth: 2,
+      useTabs: false,
+      keywordCase: 'upper',
+      dataTypeCase: 'upper',
+      functionCase: 'upper',
+      indentStyle: 'standard',
+      logicalOperatorNewline: 'before',
+      expressionWidth: 60,
+    })
+  } catch {
+    return sql
+  }
 }
 
 const highlightSql = (sql: string) => {
   if (!sql) return ''
-  // จัดรูปแบบก่อนทำ highlight
-  const formatted = formatSql(sql)
-  
-  return formatted
-    .replace(/\b(SELECT|FROM|WHERE|INNER JOIN|LEFT JOIN|RIGHT JOIN|ON|AND|OR|GROUP BY|ORDER BY|LIMIT|OFFSET|DESC|ASC|DISTINCT|COUNT|SUM|AVG|MAX|MIN|AS|IN|BETWEEN|LIKE|IS NULL|IS NOT NULL|HAVING|VALUES|UPDATE|SET|INSERT INTO|DELETE FROM)\b/gi, '<span class="text-blue-600 dark:text-blue-400 font-bold">$1</span>')
-    .replace(/\b(vtiger_[a-zA-Z0-9_]+)\b/gi, '<span class="text-emerald-600 dark:text-emerald-400">$1</span>')
-    .replace(/('.*?')/g, '<span class="text-rose-600 dark:text-rose-400">$1</span>')
+  let result = formatSql(sql)
+
+  result = result.replace(/'(.*?)'/g, '<span class="text-emerald-600 dark:text-emerald-400">\'$1\'</span>')
+
+  const keywords = [
+    'SELECT', 'FROM', 'WHERE', 'JOIN', 'ON', 'GROUP BY', 'ORDER BY', 'LIMIT', 'AND', 'OR', 'IN', 'IS NULL', 'IS NOT NULL',
+    'INSERT INTO', 'UPDATE', 'DELETE', 'VALUES', 'SET', 'COUNT', 'SUM', 'AVG', 'MIN', 'MAX',
+    'AS', 'DISTINCT', 'HAVING', 'BETWEEN', 'LIKE', 'DESC', 'ASC'
+  ]
+  keywords.forEach(word => {
+    const reg = new RegExp(`\\b${word}\\b`, 'gi')
+    result = result.replace(reg, `<span class="text-blue-600 dark:text-blue-400 font-black">${word}</span>`)
+  })
+
+  result = result.replace(/(?<![\w\-\.])\b(\d+)\b/g, '<span class="text-amber-600 dark:text-amber-500">$1</span>')
+
+  return result
+}
+
+const chartRegistry = new Map<string, object>()
+
+const hashStr = (str: string): string => {
+  let h = 5381
+  for (let i = 0; i < str.length; i++) {
+    h = (Math.imul(31, h) + str.charCodeAt(i)) | 0
+  }
+  return Math.abs(h).toString(36)
 }
 
 // Markdown Helper
 const renderMarkdown = (text: string) => {
   if (!text) return ''
-  
-  // Extract Mermaid blocks to protect them from standard markdown formatting
-  const mermaidBlocks: string[] = []
-  let html = text.replace(/```mermaid\n([\s\S]*?)\n```/gim, (match, p1) => {
-    mermaidBlocks.push(p1)
-    return `__MERMAID_BLOCK_${mermaidBlocks.length - 1}__`
+
+  // Extract chart blocks ก่อน HTML escaping เพื่อกันไม่ให้ < > ถูก escape
+  // ใช้ text placeholder ชั่วคราว แล้วค่อย restore เป็น HTML หลัง escaping
+  const chartEntries: { id: string }[] = []
+  let html = text.replace(/```chart\n([\s\S]*?)\n```/gim, (_, json) => {
+    try {
+      const config = JSON.parse(json)
+      const id = `chart-${hashStr(json)}`
+      chartRegistry.set(id, config)
+      chartEntries.push({ id })
+      return `__CHART_BLOCK_${chartEntries.length - 1}__`
+    } catch {
+      return ''
+    }
   })
 
   html = html
@@ -250,39 +288,88 @@ const renderMarkdown = (text: string) => {
   html = html.replace(/(<br\/>){3,}/gim, '<br/><br/>')
   html = html.replace(/<br\/>(<ul|<h1|<h2|<h3)/gim, '$1')
 
-  // Restore Mermaid blocks with specific class
-  mermaidBlocks.forEach((block, index) => {
-    // Escape quote marks from mermaid string block back to proper quotes if they were html escaped
-    let cleanBlock = block.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
-    
-    // --- Mermaid Syntax Auto-Fixer (Fix for 11.x strictness) ---
-    // 1. Fix Pie Chart titles missing quotes
-    if (cleanBlock.trim().toLowerCase().startsWith('pie')) {
-      cleanBlock = cleanBlock.replace(/title\s+([^"\n]+)(\n|$)/gi, 'title "$1"$2')
-    }
-    // 2. Wrap node labels with special characters in quotes (common AI mistake)
-    // Fix nodes like: A[Label (Text)] to A["Label (Text)"]
-    cleanBlock = cleanBlock.replace(/(\[|\{|\()([^"\]\}\)]*?[\(\)\s][^"\]\}\)]*?)(\]|\}|\))/g, '$1"$2"$3')
-    
-    html = html.replace(`__MERMAID_BLOCK_${index}__`, `<div class="mermaid flex justify-center w-full my-6 bg-slate-50 dark:bg-slate-800/50 p-4 rounded-xl border border-slate-200 dark:border-slate-700/50 overflow-x-auto">${cleanBlock}</div>`)
+  // Restore chart placeholders เป็น HTML จริงหลัง escaping เสร็จแล้ว
+  chartEntries.forEach(({ id }, index) => {
+    html = html.replace(
+      `__CHART_BLOCK_${index}__`,
+      `<div class="apex-chart-placeholder my-6" data-chart-id="${id}" style="min-height:300px"></div>`
+    )
   })
 
   return html
 }
 
-const renderMermaidGraphs = async () => {
-  await nextTick()
-  try {
-    // Only run if there are mermaid elements
-    const elements = document.querySelectorAll('.mermaid')
-    if (elements.length > 0) {
-      await mermaid.run({
-        querySelector: '.mermaid'
-      })
-    }
-  } catch (err) {
-    console.error('Mermaid render error', err)
+const normalizeSeries = (config: any, isPie: boolean) => {
+  const raw = config.series
+  const arr = Array.isArray(raw) ? raw : (raw != null ? [raw] : [])
+
+  if (isPie) {
+    const result = arr.map((item: any) => {
+      if (typeof item === 'number') return item
+      if (typeof item === 'object' && item !== null)
+        return Number(item.value ?? item.y ?? item.data?.[0] ?? 0)
+      return Number(item) || 0
+    })
+    return result.length ? result : [1]
   }
+
+  // bar / line / area — ต้องการ [{ name, data: number[] }]
+  const result = arr.map((item: any, i: number) => {
+    if (typeof item === 'object' && item !== null) {
+      // ตรวจสอบให้ data เป็น array เสมอ
+      const data = Array.isArray(item.data)
+        ? item.data.map((d: any) => (typeof d === 'object' ? d : Number(d)))
+        : []
+      return { name: item.name || `ชุดที่ ${i + 1}`, data }
+    }
+    return { name: `ชุดที่ ${i + 1}`, data: [Number(item) || 0] }
+  })
+  return result.length ? result : [{ name: 'ข้อมูล', data: [] }]
+}
+
+const buildApexOptions = (config: any) => {
+  const isPie = config.type === 'pie' || config.type === 'donut'
+  const isDark = document.documentElement.classList.contains('dark')
+
+  const options: any = {
+    chart: {
+      type: config.type || 'bar',
+      height: 320,
+      toolbar: { show: false },
+      fontFamily: 'Outfit, sans-serif',
+      background: 'transparent'
+    },
+    theme: { mode: isDark ? 'dark' : 'light' },
+    title: { text: config.title || '', style: { fontSize: '13px', fontWeight: '700' } },
+    series: normalizeSeries(config, isPie),
+    colors: ['#6366f1', '#22c55e', '#f59e0b', '#ec4899', '#14b8a6', '#f97316'],
+    dataLabels: { enabled: true },
+    legend: { position: 'bottom' },
+    tooltip: { theme: isDark ? 'dark' : 'light' }
+  }
+
+  // เพิ่มเฉพาะ property ที่จำเป็น ไม่ส่ง undefined ให้ ApexCharts
+  if (isPie) {
+    options.labels = Array.isArray(config.labels) ? config.labels : []
+  } else {
+    options.xaxis = { categories: Array.isArray(config.categories) ? config.categories : [] }
+  }
+
+  return options
+}
+
+const renderApexCharts = async () => {
+  await nextTick()
+  const placeholders = document.querySelectorAll('.apex-chart-placeholder[data-chart-id]')
+  placeholders.forEach(el => {
+    const id = el.getAttribute('data-chart-id')!
+    if (!id || el.children.length > 0) return
+    const config = chartRegistry.get(id) as any
+    if (!config) return
+    const options = buildApexOptions(config)
+    const chart = new ApexCharts(el as HTMLElement, options)
+    chart.render().catch((err: any) => console.error('ApexCharts render error', id, err))
+  })
 }
 
 // Pagination state
@@ -535,7 +622,7 @@ const toggleSpeak = (text: string, id: string) => {
 
   // Clean markdown for better reading
   let cleanText = text
-    .replace(/```mermaid\n([\s\S]*?)\n```/gim, 'มีกราฟแสดงผล')
+    .replace(/```chart\n([\s\S]*?)\n```/gim, 'มีกราฟแสดงผล')
     .replace(/```[\s\S]*?```/gim, 'มีข้อมูลตาราง')
     .replace(/#+\s/g, '')
     .replace(/\*\*/g, '')
@@ -614,8 +701,6 @@ const openAnalyze = (id: string) => {
 }
 
 onMounted(() => {
-  mermaid.initialize({ startOnLoad: false, theme: 'base' })
-  
   fetchHistory(1)
 
   // โหลดประวัติการวิเคราะห์และแชตจาก Offline (localStorage)
@@ -632,20 +717,24 @@ onMounted(() => {
 // บันทึกการเปลี่ยนแปลงลง Offline
 watch(analyzeState, (val) => {
   localStorage.setItem('aiquery_analyzeState', JSON.stringify(val))
-  renderMermaidGraphs()
+  renderApexCharts()
 }, { deep: true, flush: 'post' })
 
 watch(chatState, (val) => {
   localStorage.setItem('aiquery_chatState', JSON.stringify(val))
-  renderMermaidGraphs()
+  renderApexCharts()
 }, { deep: true, flush: 'post' })
 
 watch(activeModalTab, () => {
-  renderMermaidGraphs()
+  renderApexCharts()
 }, { flush: 'post' })
 
 watch(activeModalRequestId, (val) => {
-  if (val) renderMermaidGraphs()
+  if (val) renderApexCharts()
+}, { flush: 'post' })
+
+watch(isModalFullscreen, () => {
+  renderApexCharts()
 }, { flush: 'post' })
 onUnmounted(() => {
   stopSpeak()
@@ -759,9 +848,9 @@ onUnmounted(() => {
               </div>
               <div class="flex items-center gap-1.5 px-2 py-0.5 bg-blue-50/50 dark:bg-blue-900/10 text-blue-600 dark:text-blue-400 rounded text-[9px] font-black uppercase tracking-widest border border-blue-100 dark:border-blue-800/50 shrink-0">
                 <User class="w-3 h-3" />
-                {{ req.ownerDisplayName || req.user }}
+                {{ req.ownerName }}
               </div>
-              <div v-if="req.ownerDisplayName" class="flex items-center gap-1 px-2 py-0.5 bg-slate-100/80 dark:bg-white/5 text-slate-400 dark:text-slate-500 rounded text-[9px] font-medium border border-slate-200 dark:border-white/10 shrink-0">
+              <div v-if="req.ownerName !== req.user" class="flex items-center gap-1 px-2 py-0.5 bg-slate-100/80 dark:bg-white/5 text-slate-400 dark:text-slate-500 rounded text-[9px] font-medium border border-slate-200 dark:border-white/10 shrink-0">
                 ดึงข้อมูลโดย {{ req.user }}
               </div>
               <div class="hidden sm:flex items-center gap-1.5 text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest whitespace-nowrap">
