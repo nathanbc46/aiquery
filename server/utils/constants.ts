@@ -245,8 +245,11 @@ Table: vtiger_assets (Assets / ทรัพย์สินลูกค้า)
 - IMPORTANT QUERY PATTERN — ACTIVE ASSETS (Most Recent Record Per Serial Number):
   Vtiger creates a new row in vtiger_assets every time an asset is renewed. To get only the
   LATEST (active) record for each unique serialnumber, use a CTE with ROW_NUMBER():
+  
+  CRITICAL WARNING: AI MUST NEVER USE "PARTITION BY a.account" FOR ASSETS. 
+  YOU MUST USE THE EXACT "PARTITION BY (CASE WHEN...)" LOGIC SHOWN BELOW. IF YOU DO NOT, THE QUERY WILL BE WRONG.
 
-  Example:
+  Example (YOU MUST COPY AND PASTE THIS EXACT LOGIC FOR rn. DO NOT SIMPLIFY IT):
     WITH ranked AS (
       SELECT
         a.*,
