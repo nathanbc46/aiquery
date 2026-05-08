@@ -34,12 +34,21 @@ export default defineEventHandler(async (event) => {
     }
 
     // Add schema context to the system prompt
-    const finalSystemPrompt = `${systemPrompt}\n\nนี่คือข้อมูลโครงสร้างฐานข้อมูล (Schema Context) เพื่อใช้ประกอบการขัดเกลาคำถาม:\n${schemaContext}`;
+    let finalSystemPrompt = `${systemPrompt}\n\nนี่คือข้อมูลโครงสร้างฐานข้อมูล (Schema Context) เพื่อใช้ประกอบการขัดเกลาคำถาม:\n${schemaContext}`;
+    
+    // Force the AI to ignore the JSON output rule from the schema context
+    finalSystemPrompt += `\n\nCRITICAL OVERRIDE FOR OUTPUT FORMAT:
+IGNORE any instruction above that asks for JSON output.
+You MUST output ONLY the plain text refined question.
+NO JSON, NO Markdown code blocks, NO explanations. Just the final sentence.`;
 
     const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: modelName });
+    const model = genAI.getGenerativeModel({ 
+      model: modelName,
+      systemInstruction: finalSystemPrompt
+    });
 
-    const result = await model.generateContent([finalSystemPrompt, prompt as string]);
+    const result = await model.generateContent(prompt as string);
 
     const refinedText = result.response.text().trim();
 

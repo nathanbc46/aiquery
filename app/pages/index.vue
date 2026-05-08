@@ -307,6 +307,22 @@ const renderedExplanation = computed(() => {
   return DOMPurify.sanitize(marked.parse(text) as string)
 })
 
+const isExplanationCopied = ref(false)
+const copyExplanation = async () => {
+  if (!generatedResult.value?.explanation) return
+  try {
+    const textToCopy = generatedResult.value.explanation.replace(/\*/g, '')
+    await navigator.clipboard.writeText(textToCopy)
+    isExplanationCopied.value = true
+    toast.success('คัดลอกสำเร็จ', 'คัดลอกคำอธิบายลงคลิปบอร์ดแล้ว')
+    setTimeout(() => {
+      isExplanationCopied.value = false
+    }, 2000)
+  } catch (err) {
+    toast.error('ผิดพลาด', 'ไม่สามารถคัดลอกข้อความได้')
+  }
+}
+
 const handleZohoExport = async () => {
   isExportingZoho.value = true
   try {
@@ -762,7 +778,7 @@ const highlightSql = (sqlStr: string) => {
               :readonly="isGenerating"
               @keydown.enter.exact.prevent="generateSql"
               placeholder="เช่น ขอลูกค้าที่มียอดสั่งซื้อเกิน 1 แสนบาทในปีนี้ พร้อมเบอร์ติดต่อ... (Enter เพื่อประมวลผล)" 
-              class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-[1.5rem] px-6 py-5 pr-14 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder:text-slate-600 focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 dark:focus:border-blue-400 transition-all resize-none h-40 text-lg leading-relaxed shadow-inner disabled:opacity-50"
+              class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-[1.5rem] px-6 py-5 pr-14 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder:text-slate-600 focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 dark:focus:border-blue-400 transition-all resize-y min-h-[160px] text-lg leading-relaxed shadow-inner disabled:opacity-50"
               :disabled="isGenerating"
             ></textarea>
             <div class="absolute right-5 bottom-5 flex items-center gap-2">
@@ -980,14 +996,25 @@ const highlightSql = (sqlStr: string) => {
                   <Wand2 class="w-4 h-4" />
                   AI Analysis Summary
                 </div>
-                <button 
-                  @click="isSqlModalOpen = true"
-                  class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white dark:bg-slate-800 text-slate-500 hover:text-blue-600 dark:hover:text-blue-400 border border-slate-200 dark:border-slate-700 shadow-sm transition-all active:scale-95 text-[10px] font-bold uppercase tracking-wider"
-                  title="ดูคำสั่ง SQL ที่ใช้ดึงข้อมูล"
-                >
-                  <Terminal class="w-3.5 h-3.5" />
-                  View SQL
-                </button>
+                <div class="flex items-center gap-2">
+                  <button 
+                    @click="copyExplanation"
+                    class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white dark:bg-slate-800 text-slate-500 hover:text-blue-600 dark:hover:text-blue-400 border border-slate-200 dark:border-slate-700 shadow-sm transition-all active:scale-95 text-[10px] font-bold uppercase tracking-wider"
+                    title="คัดลอกคำอธิบาย"
+                  >
+                    <Copy v-if="!isExplanationCopied" class="w-3.5 h-3.5" />
+                    <CheckCircle2 v-else class="w-3.5 h-3.5 text-emerald-500" />
+                    {{ isExplanationCopied ? 'Copied' : 'Copy' }}
+                  </button>
+                  <button 
+                    @click="isSqlModalOpen = true"
+                    class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white dark:bg-slate-800 text-slate-500 hover:text-blue-600 dark:hover:text-blue-400 border border-slate-200 dark:border-slate-700 shadow-sm transition-all active:scale-95 text-[10px] font-bold uppercase tracking-wider"
+                    title="ดูคำสั่ง SQL ที่ใช้ดึงข้อมูล"
+                  >
+                    <Terminal class="w-3.5 h-3.5" />
+                    View SQL
+                  </button>
+                </div>
               </div>
               <div class="text-slate-700 dark:text-slate-200 leading-relaxed text-sm font-medium prose prose-slate dark:prose-invert prose-p:my-2 prose-ul:my-2 prose-li:my-1 max-w-none prose-markdown" v-html="renderedExplanation"></div>
             </div>
@@ -1362,7 +1389,7 @@ const highlightSql = (sqlStr: string) => {
                     <textarea
                       v-model="editedSql"
                       class="flex-1 w-full bg-slate-50 dark:bg-slate-950/50 rounded-2xl p-8 border border-slate-200 dark:border-slate-800 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all font-mono text-sm leading-relaxed outline-none resize-none custom-scrollbar text-slate-800 dark:text-slate-200 placeholder:text-slate-400 dark:placeholder:text-slate-600"
-                      :style="isSqlModalFullscreen ? 'min-height: 0' : 'min-height: 260px'"
+                      :style="isSqlModalFullscreen ? 'min-height: 0' : 'min-height: 50vh'"
                       placeholder="แก้ไขคำสั่ง SQL ที่นี่..."
                     ></textarea>
                     <div class="absolute top-4 right-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest bg-white/80 dark:bg-slate-900/80 px-2 py-1 rounded-md border border-slate-200 dark:border-slate-800 opacity-0 group-hover:opacity-100 transition-opacity">SQL Editor Mode</div>

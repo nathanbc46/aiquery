@@ -194,7 +194,7 @@ Table: vtiger_salesorder (Sales Orders / ใบสั่งขาย)
 - total (DECIMAL, Total Amount)
 - adjustment (DECIMAL, ส่วนลดหรือค่าปรับปรุงเพิ่มเติม)
 - sostatus (VARCHAR, Status e.g. 'Created', 'Waiting for Approval', 'Approved', 'Rejected', 'Ordered', 'Goods Received', 'Tax Invoice', 'Closed', 'Cancelled', 'Paid')
-- Note: To get createdtime, MUST JOIN with vtiger_crmentity ON vtiger_salesorder.salesorderid = vtiger_crmentity.crmid
+- Note: To get createdtime, MUST JOIN with vtiger_crmentity ON vtiger_salesorder.salesorderid = vtiger_crmentity.crmid and use vtiger_crmentity.createdtime (do NOT use so.createdtime or vtiger_salesorder.createdtime)
 
 Table: vtiger_salesordercf (Sales Order Custom Fields / ข้อมูลเพิ่มเติมของใบสั่งขาย)
 - salesorderid (INT, Primary Key, joins with vtiger_salesorder.salesorderid)
