@@ -77,6 +77,17 @@ export const aiMailSettings = mysqlTable('ai_mail_settings', {
   updatedAt: timestamp('updated_at').defaultNow().onUpdateNow(),
 });
 
+// Zoho OAuth Config Table
+export const aiZohoConfig = mysqlTable('ai_zoho_config', {
+  id: varchar('id', { length: 50 }).primaryKey().default('global'),
+  clientId: varchar('client_id', { length: 255 }),
+  clientSecret: varchar('client_secret', { length: 255 }),
+  refreshToken: text('refresh_token'),
+  accessToken: text('access_token'),
+  expiresAt: timestamp('expires_at'),
+  updatedAt: timestamp('updated_at').defaultNow().onUpdateNow(),
+});
+
 // AI Favorites Table for User Saved Queries
 export const aiFavorites = mysqlTable('ai_favorites', {
   id: varchar('id', { length: 36 }).primaryKey(), // UUID
