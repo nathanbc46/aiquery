@@ -3,7 +3,7 @@ import { sql } from 'drizzle-orm';
 
 export async function getValidZohoToken() {
   const db = await useDb();
-  const [configs]: any = await db.execute(sql.raw(`SELECT * FROM ai_zoho_config WHERE id = 'global' LIMIT 1`));
+  const [configs]: any = await db.execute(sql`SELECT * FROM ai_zoho_config WHERE id = 'global' LIMIT 1`);
   const config = configs[0];
 
   if (!config || !config.refresh_token) {
@@ -39,14 +39,15 @@ export async function getValidZohoToken() {
 
   const newAccessToken = tokenResponse.access_token;
   const newExpiresAt = new Date(Date.now() + tokenResponse.expires_in * 1000);
+  const newExpiresAtStr = newExpiresAt.toISOString().slice(0, 19).replace('T', ' ');
 
-  // Update DB
-  await db.execute(sql.raw(`
-    UPDATE ai_zoho_config 
-    SET access_token = '${newAccessToken}', 
-        expires_at = '${newExpiresAt.toISOString().slice(0, 19).replace('T', ' ')}'
+  // ใช้ parameterized query เพื่อป้องกัน special chars ใน token พัง SQL
+  await db.execute(sql`
+    UPDATE ai_zoho_config
+    SET access_token = ${newAccessToken},
+        expires_at   = ${newExpiresAtStr}
     WHERE id = 'global'
-  `));
+  `);
 
   return newAccessToken;
 }
