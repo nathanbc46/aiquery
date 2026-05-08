@@ -1202,7 +1202,7 @@ const highlightSql = (sqlStr: string) => {
                     ยกเลิก
                   </button>
                   <button 
-                    @click="requestApproval"
+                    @click="() => requestApproval()"
                     :disabled="isRequesting || !requestReason"
                     class="px-12 py-5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-base font-black rounded-3xl shadow-2xl shadow-blue-500/30 transition-all flex items-center justify-center gap-3 active:scale-95 uppercase tracking-widest"
                   >
