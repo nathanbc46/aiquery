@@ -330,7 +330,7 @@ const closeMobileMenu = () => {
     </transition>
 
     <!-- Main Content -->
-    <main class="flex-1 h-screen overflow-y-auto pt-20 lg:pt-0 relative">
+    <main class="flex-1 lg:h-screen lg:overflow-y-auto pt-20 lg:pt-0 relative">
       <div class="max-w-7xl mx-auto p-6 md:p-10 lg:p-12 min-h-full flex flex-col">
         <div class="flex-1">
           <slot />
@@ -394,7 +394,7 @@ const closeMobileMenu = () => {
 
 body {
   font-family: 'Outfit', sans-serif;
-  @apply antialiased overflow-hidden bg-slate-50 dark:bg-slate-950;
+  @apply antialiased bg-slate-50 dark:bg-slate-950;
 }
 
 /* Custom Scrollbar */
