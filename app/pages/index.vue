@@ -137,12 +137,34 @@ const renderChatMarkdown = (text: string): string => {
     .replace(/^# (.*$)/gim, '<h1 class="text-base font-black text-indigo-900 dark:text-indigo-300 mt-5 mb-3">$1</h1>')
     .replace(/\*\*(.*?)\*\*/gim, '<strong class="font-black text-slate-900 dark:text-white">$1</strong>')
     .replace(/\*(.*?)\*/gim, '<em class="italic text-slate-600 dark:text-slate-400">$1</em>')
-    .replace(/^\s*[-*]\s+(.*)$/gim, '<li class="ml-5 list-disc py-0.5">$1</li>')
+    .replace(/^\s*\*\s+(.*)$/gim, '<li class="ml-5 list-disc py-0.5">$1</li>')
+    .replace(/^\s*-\s+(.*)$/gim, '<li class="ml-5 list-disc py-0.5">$1</li>')
     .replace(/`(.*?)`/gim, '<code class="px-1.5 py-0.5 bg-indigo-50 dark:bg-indigo-900/40 border border-indigo-100 dark:border-indigo-800/50 rounded-md text-indigo-600 dark:text-indigo-300 text-[11px] font-mono">$1</code>')
+
+  // Table support
+  html = html.replace(/((?:\|[^\n]+\|(?:\n|$)){2,})/gim, (match) => {
+    const rows = match.trim().split('\n').filter(r => r.trim() !== '')
+    if (rows.length < 2) return match
+    const tableRows = rows.map((row, index) => {
+      const cells = row.split('|').filter((_, i, arr) => i > 0 && i < arr.length - 1)
+      if (index === 1 && cells.every(c => c.trim().match(/^:?-+:?$/))) return ''
+      const tag = index === 0 ? 'th' : 'td'
+      const cellStyle = tag === 'th'
+        ? 'px-4 py-3 bg-slate-200 dark:bg-slate-700 text-slate-900 dark:text-white font-black uppercase tracking-wider text-[10px] border border-slate-300 dark:border-slate-600 text-left'
+        : 'px-4 py-2.5 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300'
+      const renderedCells = cells.map(c => `<${tag} class="${cellStyle}">${c.trim()}</${tag}>`).join('')
+      const rowStyle = index === 0 ? '' : (index % 2 === 0 ? 'bg-white dark:bg-slate-900' : 'bg-slate-50 dark:bg-slate-800/60')
+      return `<tr class="${rowStyle}">${renderedCells}</tr>`
+    }).filter(r => r !== '').join('')
+    return `<div class="overflow-x-auto my-4 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm"><table class="w-full text-[11px] border-collapse min-w-full">${tableRows}</table></div>`
+  })
+
+  html = html
     .replace(/\n/gim, '<br/>')
     .replace(/(<li.*?>.*?<\/li><br\/>)+/gim, '<ul class="my-3 space-y-1">$&</ul>')
     .replace(/<\/li><br\/>/gim, '</li>')
     .replace(/(<br\/>){3,}/gim, '<br/><br/>')
+    .replace(/<br\/>(<ul|<h1|<h2|<h3)/gim, '$1')
 
   entries.forEach(({ id }, index) => {
     html = html.replace(
@@ -204,12 +226,20 @@ watch(isChatFullscreen, () => {
 }, { flush: 'post' })
 
 const openChatModal = () => {
+  isChatFullscreen.value = false
+  isChatModalOpen.value = true
+  scrollChatToBottom()
+}
+
+const resetChat = () => {
   chatMessages.value = []
   chatInput.value = ''
   chatChartRegistry.clear()
-  isChatFullscreen.value = false
-  isChatModalOpen.value = true
 }
+
+watch(generatedResult, (newVal, oldVal) => {
+  if (!newVal || (oldVal && newVal !== oldVal)) resetChat()
+})
 
 const sendQuickReply = (q: string) => {
   chatInput.value = q
@@ -2057,7 +2087,6 @@ const highlightSql = (sqlStr: string) => {
             v-if="isChatModalOpen"
             class="fixed inset-0 z-[160] flex items-center justify-center bg-slate-950/90 backdrop-blur-md"
             :class="isChatFullscreen ? 'p-0' : 'p-4'"
-            @click.self="isChatModalOpen = false"
           >
             <div
               class="bg-white dark:bg-slate-900 flex flex-col overflow-hidden border border-slate-200 dark:border-slate-800 animate-in zoom-in-95 duration-200 w-full transition-all"
@@ -2155,9 +2184,9 @@ const highlightSql = (sqlStr: string) => {
                 <div class="flex items-end gap-3">
                   <textarea
                     v-model="chatInput"
-                    placeholder="ถามเกี่ยวกับข้อมูลชุดนี้... (Ctrl+Enter เพื่อส่ง)"
+                    placeholder="ถามเกี่ยวกับข้อมูลชุดนี้... (Enter เพื่อส่ง, Shift+Enter ขึ้นบรรทัด)"
                     rows="2"
-                    @keydown.ctrl.enter.prevent="sendChatMessage"
+                    @keydown.enter.exact.prevent="sendChatMessage"
                     :disabled="isChatLoading"
                     class="flex-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl px-4 py-3 text-sm text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-violet-500/30 focus:border-violet-500 dark:focus:border-violet-400 transition-all resize-none disabled:opacity-50"
                   ></textarea>
