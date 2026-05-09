@@ -232,12 +232,15 @@ const openChatModal = async () => {
   isChatModalOpen.value = true
   scrollChatToBottom()
   if (!chatSessionId.value && generatedResult.value?.sql) {
+    const preview = generatedResult.value.previewData ?? []
+    const total = generatedResult.value.previewCount ?? 0
+    const allDataInPreview = preview.length > 0 && preview.length >= total
     isChatInitializing.value = true
     try {
-      const res = await $fetch<any>('/api/ai-query/chat-direct-init', {
-        method: 'POST',
-        body: { sql: generatedResult.value.sql }
-      })
+      const body = allDataInPreview
+        ? { previewData: preview }
+        : { sql: generatedResult.value.sql }
+      const res = await $fetch<any>('/api/ai-query/chat-direct-init', { method: 'POST', body })
       chatSessionId.value = res.sessionId
     } catch {
       toast.error('โหลดข้อมูลไม่สำเร็จ', 'ไม่สามารถเตรียมข้อมูลสำหรับ AI ได้')
@@ -250,8 +253,14 @@ const openChatModal = async () => {
 const resetChat = () => {
   chatMessages.value = []
   chatInput.value = ''
-  chatSessionId.value = null
   chatChartRegistry.clear()
+  if (chatSessionId.value) {
+    $fetch('/api/ai-query/chat-direct-session', {
+      method: 'DELETE',
+      body: { sessionId: chatSessionId.value }
+    }).catch(() => {})
+    chatSessionId.value = null
+  }
 }
 
 watch(generatedResult, (newVal, oldVal) => {
