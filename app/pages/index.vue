@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, computed } from 'vue'
+import { ref, watch, computed, nextTick } from 'vue'
 import { format } from 'sql-formatter'
 import { 
   Sparkles, 
@@ -31,10 +31,13 @@ import {
   Maximize2,
   Minimize2,
   CheckCircle2,
-  Lightbulb
+  Lightbulb,
+  Send,
+  MessageSquare
 } from 'lucide-vue-next'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
+import ApexCharts from 'apexcharts'
 
 
 const prompt = ref('')
@@ -93,6 +96,140 @@ const csvSuccessDone = ref(false)
 
 // Zoho success state
 const zohoSuccessDone = ref(false)
+
+// AI Chat (Admin) state
+const isChatModalOpen = ref(false)
+const chatMessages = ref<Array<{ role: 'user' | 'model'; content: string }>>([])
+const chatInput = ref('')
+const isChatLoading = ref(false)
+const chatScrollRef = ref<HTMLElement | null>(null)
+const chatChartRegistry = new Map<string, any>()
+
+// Chat helpers
+const chatHashStr = (str: string): string => {
+  let h = 5381
+  for (let i = 0; i < str.length; i++) {
+    h = (Math.imul(31, h) + str.charCodeAt(i)) | 0
+  }
+  return Math.abs(h).toString(36)
+}
+
+const renderChatMarkdown = (text: string): string => {
+  if (!text) return ''
+  const entries: { id: string }[] = []
+  let html = text.replace(/```chart\n([\s\S]*?)\n```/gim, (_, json) => {
+    try {
+      const config = JSON.parse(json)
+      const id = `chat-chart-${chatHashStr(json + Date.now() + Math.random())}`
+      chatChartRegistry.set(id, config)
+      entries.push({ id })
+      return `__CHART_${entries.length - 1}__`
+    } catch {
+      return ''
+    }
+  })
+
+  html = html
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/^### (.*$)/gim, '<h3 class="text-[13px] font-black text-indigo-900 dark:text-indigo-300 mt-5 mb-2 uppercase tracking-wide">$1</h3>')
+    .replace(/^## (.*$)/gim, '<h2 class="text-sm font-black text-indigo-900 dark:text-indigo-300 mt-5 mb-2">$1</h2>')
+    .replace(/^# (.*$)/gim, '<h1 class="text-base font-black text-indigo-900 dark:text-indigo-300 mt-5 mb-3">$1</h1>')
+    .replace(/\*\*(.*?)\*\*/gim, '<strong class="font-black text-slate-900 dark:text-white">$1</strong>')
+    .replace(/\*(.*?)\*/gim, '<em class="italic text-slate-600 dark:text-slate-400">$1</em>')
+    .replace(/^\s*[-*]\s+(.*)$/gim, '<li class="ml-5 list-disc py-0.5">$1</li>')
+    .replace(/`(.*?)`/gim, '<code class="px-1.5 py-0.5 bg-indigo-50 dark:bg-indigo-900/40 border border-indigo-100 dark:border-indigo-800/50 rounded-md text-indigo-600 dark:text-indigo-300 text-[11px] font-mono">$1</code>')
+    .replace(/\n/gim, '<br/>')
+    .replace(/(<li.*?>.*?<\/li><br\/>)+/gim, '<ul class="my-3 space-y-1">$&</ul>')
+    .replace(/<\/li><br\/>/gim, '</li>')
+    .replace(/(<br\/>){3,}/gim, '<br/><br/>')
+
+  entries.forEach(({ id }, index) => {
+    html = html.replace(
+      `__CHART_${index}__`,
+      `<div class="apex-chat-chart my-4" data-chart-id="${id}" style="min-height:300px"></div>`
+    )
+  })
+  return html
+}
+
+const renderChatApexCharts = async () => {
+  await nextTick()
+  const placeholders = document.querySelectorAll('.apex-chat-chart[data-chart-id]')
+  placeholders.forEach(el => {
+    const id = el.getAttribute('data-chart-id')!
+    if (!id || el.children.length > 0) return
+    const config = chatChartRegistry.get(id) as any
+    if (!config) return
+    const isPie = config.type === 'pie' || config.type === 'donut'
+    const isDark = document.documentElement.classList.contains('dark')
+    const rawSeries = Array.isArray(config.series) ? config.series : (config.series != null ? [config.series] : [])
+    const series = isPie
+      ? rawSeries.map((item: any) => (typeof item === 'number' ? item : Number(item?.value ?? item?.data?.[0] ?? 0)))
+      : rawSeries.map((item: any, i: number) => ({
+          name: item?.name || `ชุดที่ ${i + 1}`,
+          data: Array.isArray(item?.data) ? item.data.map((d: any) => (typeof d === 'object' ? d : Number(d))) : []
+        }))
+    const options: any = {
+      chart: { type: config.type || 'bar', height: 300, toolbar: { show: false }, fontFamily: 'Outfit, sans-serif', background: 'transparent' },
+      theme: { mode: isDark ? 'dark' : 'light' },
+      title: { text: config.title || '', style: { fontSize: '13px', fontWeight: '700' } },
+      series: series.length ? series : (isPie ? [1] : [{ name: 'ข้อมูล', data: [] }]),
+      colors: ['#6366f1', '#22c55e', '#f59e0b', '#ec4899', '#14b8a6', '#f97316'],
+      dataLabels: { enabled: true },
+      legend: { position: 'bottom' },
+      tooltip: { theme: isDark ? 'dark' : 'light' }
+    }
+    if (isPie) { options.labels = Array.isArray(config.labels) ? config.labels : [] }
+    else { options.xaxis = { categories: Array.isArray(config.categories) ? config.categories : [] } }
+    const chart = new ApexCharts(el as HTMLElement, options)
+    chart.render().catch((err: any) => console.error('Chat chart render error', id, err))
+  })
+}
+
+const scrollChatToBottom = () => {
+  nextTick(() => {
+    if (chatScrollRef.value) {
+      chatScrollRef.value.scrollTop = chatScrollRef.value.scrollHeight
+    }
+  })
+}
+
+const openChatModal = () => {
+  chatMessages.value = []
+  chatInput.value = ''
+  chatChartRegistry.clear()
+  isChatModalOpen.value = true
+}
+
+const sendChatMessage = async () => {
+  const msg = chatInput.value.trim()
+  if (!msg || isChatLoading.value) return
+  chatInput.value = ''
+  chatMessages.value.push({ role: 'user', content: msg })
+  isChatLoading.value = true
+  scrollChatToBottom()
+  try {
+    const history = chatMessages.value.slice(0, -1).map(m => ({ role: m.role, content: m.content }))
+    const res = await $fetch<any>('/api/ai-query/chat-direct', {
+      method: 'POST',
+      body: {
+        sql: generatedResult.value?.sql || '',
+        queryText: prompt.value,
+        previewData: generatedResult.value?.previewData || [],
+        userMessage: msg,
+        messages: history
+      }
+    })
+    chatMessages.value.push({ role: 'model', content: res.reply })
+    await renderChatApexCharts()
+    scrollChatToBottom()
+  } catch (err: any) {
+    chatMessages.value.push({ role: 'model', content: `เกิดข้อผิดพลาด: ${err?.data?.message || err.message || 'ไม่สามารถติดต่อ AI ได้'}` })
+    scrollChatToBottom()
+  } finally {
+    isChatLoading.value = false
+  }
+}
 
 const openCsvModal = () => {
   const today = new Date().toISOString().slice(0, 10).replace(/-/g, '')
@@ -1246,7 +1383,19 @@ const highlightSql = (sqlStr: string) => {
               <div class="hidden sm:block w-px h-10 bg-slate-200 dark:bg-slate-800 mx-2"></div>
 
               <!-- Primary Action Group -->
-              <div class="w-full sm:w-auto relative group/export">
+              <div class="w-full sm:w-auto flex items-center gap-3">
+                <!-- Chat with AI button (Admin only) -->
+                <button
+                  v-if="isAdmin"
+                  @click="openChatModal"
+                  :disabled="!generatedResult || generatedResult.previewCount === 0"
+                  class="px-5 py-5 bg-violet-600 hover:bg-violet-700 disabled:opacity-40 disabled:grayscale text-white rounded-[2rem] shadow-2xl shadow-violet-500/30 transition-all flex items-center gap-2 active:scale-95"
+                  title="แชตถาม AI จากข้อมูลนี้"
+                >
+                  <MessageSquare class="w-5 h-5" />
+                  <span class="text-xs font-black uppercase tracking-widest">แชต AI</span>
+                </button>
+
                 <div v-if="isAdmin" class="flex items-stretch shadow-2xl shadow-emerald-500/30 rounded-[2rem] overflow-hidden">
                   <button
                     @click="openCsvModal"
@@ -1876,6 +2025,99 @@ const highlightSql = (sqlStr: string) => {
                     class="flex-1 py-4 bg-rose-600 hover:bg-rose-700 text-white text-xs font-black rounded-2xl shadow-lg shadow-rose-500/20 transition-all active:scale-95 uppercase tracking-widest"
                   >
                     ยืนยันการลบ
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </transition>
+      </Teleport>
+    </ClientOnly>
+
+    <!-- AI Chat Modal (Admin only) -->
+    <ClientOnly>
+      <Teleport to="body">
+        <transition name="modal">
+          <div v-if="isChatModalOpen" class="fixed inset-0 z-[160] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md" @click.self="isChatModalOpen = false">
+            <div class="bg-white dark:bg-slate-900 rounded-[2rem] shadow-2xl w-full max-w-2xl h-[80vh] flex flex-col overflow-hidden border border-slate-200 dark:border-slate-800 animate-in zoom-in-95 duration-200" @click.stop>
+              <!-- Header -->
+              <div class="px-7 py-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-violet-50/40 dark:bg-violet-900/10 shrink-0">
+                <div class="flex items-center gap-3">
+                  <div class="w-9 h-9 rounded-xl bg-violet-100 dark:bg-violet-900/40 flex items-center justify-center text-violet-600 dark:text-violet-400">
+                    <BrainCircuit class="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 class="text-base font-black text-slate-900 dark:text-white">แชตถาม AI จากข้อมูลนี้</h3>
+                    <p class="text-[10px] font-bold text-violet-600/60 dark:text-violet-400/60 uppercase tracking-widest">
+                      {{ generatedResult?.previewCount ?? 0 }} รายการ · {{ generatedResult?.previewData?.length ?? 0 }} rows ใน context
+                    </p>
+                  </div>
+                </div>
+                <button @click="isChatModalOpen = false" class="p-2 rounded-xl text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
+                  <X class="w-5 h-5" />
+                </button>
+              </div>
+
+              <!-- Messages area -->
+              <div ref="chatScrollRef" class="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar">
+                <!-- Empty state -->
+                <div v-if="chatMessages.length === 0" class="flex flex-col items-center justify-center h-full text-center gap-4 py-10">
+                  <div class="w-16 h-16 rounded-2xl bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center">
+                    <BrainCircuit class="w-8 h-8 text-violet-500" />
+                  </div>
+                  <div>
+                    <p class="text-sm font-black text-slate-700 dark:text-slate-300">ถามอะไรก็ได้เกี่ยวกับข้อมูลชุดนี้</p>
+                    <p class="text-xs text-slate-400 mt-1">เช่น "สรุปให้หน่อย", "แสดงเป็นกราฟ", "ข้อมูลไหนน่าสนใจ"</p>
+                  </div>
+                </div>
+
+                <!-- Chat bubbles -->
+                <template v-for="(msg, idx) in chatMessages" :key="idx">
+                  <!-- User bubble -->
+                  <div v-if="msg.role === 'user'" class="flex justify-end">
+                    <div class="max-w-[80%] px-5 py-3 bg-violet-600 text-white rounded-2xl rounded-tr-sm text-sm font-medium leading-relaxed shadow-md shadow-violet-500/20">
+                      {{ msg.content }}
+                    </div>
+                  </div>
+                  <!-- AI bubble -->
+                  <div v-else class="flex justify-start gap-3">
+                    <div class="w-8 h-8 rounded-xl bg-violet-100 dark:bg-violet-900/40 flex items-center justify-center text-violet-600 dark:text-violet-400 shrink-0 mt-1">
+                      <BrainCircuit class="w-4 h-4" />
+                    </div>
+                    <div class="max-w-[85%] px-5 py-3 bg-slate-100 dark:bg-slate-800 rounded-2xl rounded-tl-sm text-sm text-slate-800 dark:text-slate-200 leading-relaxed shadow-sm" v-html="renderChatMarkdown(msg.content)"></div>
+                  </div>
+                </template>
+
+                <!-- Loading -->
+                <div v-if="isChatLoading" class="flex justify-start gap-3">
+                  <div class="w-8 h-8 rounded-xl bg-violet-100 dark:bg-violet-900/40 flex items-center justify-center text-violet-500 shrink-0 mt-1">
+                    <Loader2 class="w-4 h-4 animate-spin" />
+                  </div>
+                  <div class="px-5 py-4 bg-slate-100 dark:bg-slate-800 rounded-2xl rounded-tl-sm flex items-center gap-2">
+                    <span class="w-2 h-2 bg-violet-400 rounded-full animate-bounce [animation-delay:0ms]"></span>
+                    <span class="w-2 h-2 bg-violet-400 rounded-full animate-bounce [animation-delay:150ms]"></span>
+                    <span class="w-2 h-2 bg-violet-400 rounded-full animate-bounce [animation-delay:300ms]"></span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Input area -->
+              <div class="p-4 border-t border-slate-100 dark:border-slate-800 shrink-0 bg-slate-50/50 dark:bg-slate-900/50">
+                <div class="flex items-end gap-3">
+                  <textarea
+                    v-model="chatInput"
+                    placeholder="ถามเกี่ยวกับข้อมูลชุดนี้... (Ctrl+Enter เพื่อส่ง)"
+                    rows="2"
+                    @keydown.ctrl.enter.prevent="sendChatMessage"
+                    :disabled="isChatLoading"
+                    class="flex-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl px-4 py-3 text-sm text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-violet-500/30 focus:border-violet-500 dark:focus:border-violet-400 transition-all resize-none disabled:opacity-50"
+                  ></textarea>
+                  <button
+                    @click="sendChatMessage"
+                    :disabled="!chatInput.trim() || isChatLoading"
+                    class="p-3.5 bg-violet-600 hover:bg-violet-700 disabled:opacity-40 disabled:grayscale text-white rounded-2xl shadow-lg shadow-violet-500/20 transition-all active:scale-95 shrink-0"
+                  >
+                    <Send class="w-5 h-5" />
                   </button>
                 </div>
               </div>
