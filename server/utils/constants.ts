@@ -223,6 +223,7 @@ Table: vtiger_products (Products / สินค้า)
 - productcategory (VARCHAR, Joins with vtiger_productcategory.productcategory, Valid values: see MASTER_LIST.PRODUCT_CATEGORIES)
 - unit_price (DECIMAL)
 - discontinued (INT, 1 = Active / เปิดใช้งาน, 0 = Inactive / เลิกใช้งาน)
+- IMPORTANT: This table does NOT have a column named 'product'. Always use 'productid' for joins.
 
 Table: vtiger_inventoryproductrel (Line Items for Quotes/Orders / รายการสินค้าในใบเสนอราคาหรือใบสั่งขาย)
 - id (INT, Foreign key back to the parent document — join as: vtiger_inventoryproductrel.id = vtiger_salesorder.salesorderid OR vtiger_inventoryproductrel.id = vtiger_quotes.quoteid)
@@ -235,7 +236,7 @@ Table: vtiger_assets (Assets / ทรัพย์สินลูกค้า)
 - assetsid (INT, Primary Key, joins with vtiger_crmentity.crmid)
 - asset_no (VARCHAR)
 - assetname (VARCHAR)
-- product (INT, Joins with vtiger_products.productid)
+- product (INT, Joins with vtiger_products.productid - this is the FK, use vtiger_assets.product = vtiger_products.productid)
 - account (INT, Joins with vtiger_account.accountid)
 - serialnumber (VARCHAR)
 - tagnumber (INT, จำนวน / Quantity of this asset)
@@ -425,6 +426,8 @@ CRITICAL RULES FOR SQL GENERATION:
 15. DATE FORMAT: Always write date literals as 'YYYY-MM-DD' (e.g. '2026-04-01'). Never use DD/MM/YYYY or other formats — MySQL may misparse them.
 
 16. NULL HANDLING: When a LEFT JOIN column may be NULL and you need a fallback display value, use COALESCE(col, '') or IFNULL(col, '-'). Apply when the column is optional data that users expect to see as blank rather than NULL.
+
+17. JOIN ALIAS VALIDATION: Double check join conditions. For example, when joining vtiger_assets (a) and vtiger_products (p), use "a.product = p.productid". Never assume vtiger_products has a column named 'product'.
 
 ---
 OUTPUT FORMAT:

@@ -1080,11 +1080,11 @@ const highlightSql = (sqlStr: string) => {
                   <h5 class="text-sm font-black uppercase tracking-wider">เกิดข้อผิดพลาดในการประมวลผล SQL</h5>
                   <p class="text-xs font-medium leading-relaxed opacity-80">AI อาจสร้างคำสั่ง SQL ที่ไม่ถูกต้องตามโครงสร้างฐานข้อมูลปัจจุบัน:</p>
                   <div class="mt-2 space-y-3">
-                    <div class="p-4 bg-slate-900 rounded-xl font-mono text-[10px] text-rose-300 overflow-x-auto border border-rose-900/30">
+                    <div class="p-4 bg-rose-100/50 dark:bg-slate-900 rounded-xl font-mono text-[10px] text-rose-700 dark:text-rose-300 overflow-x-auto border border-rose-200 dark:border-rose-900/30">
                       <div class="mb-2 text-[8px] font-black uppercase text-rose-500/50 tracking-widest">Database Error:</div>
                       {{ generatedResult.dbError }}
                     </div>
-                    <div class="p-4 bg-slate-900 rounded-xl font-mono text-[10px] text-rose-400 overflow-x-auto border border-rose-900/30 group/errsql relative">
+                    <div class="p-4 bg-rose-100/50 dark:bg-slate-900 rounded-xl font-mono text-[10px] text-rose-800 dark:text-rose-400 overflow-x-auto border border-rose-200 dark:border-rose-900/30 group/errsql relative">
                       <div class="mb-2 text-[8px] font-black uppercase text-rose-500/50 tracking-widest flex justify-between items-center">
                         <span>Attempted SQL Query:</span>
                         <button @click="copySql" class="hover:text-rose-300 transition-colors">
