@@ -103,6 +103,8 @@ const isChatFullscreen = ref(false)
 const chatMessages = ref<Array<{ role: 'user' | 'model'; content: string }>>([])
 const chatInput = ref('')
 const isChatLoading = ref(false)
+const isChatInitializing = ref(false)
+const chatSessionId = ref<string | null>(null)
 const chatScrollRef = ref<HTMLElement | null>(null)
 const chatChartRegistry = new Map<string, any>()
 
@@ -225,15 +227,30 @@ watch(isChatFullscreen, () => {
   renderChatApexCharts()
 }, { flush: 'post' })
 
-const openChatModal = () => {
+const openChatModal = async () => {
   isChatFullscreen.value = false
   isChatModalOpen.value = true
   scrollChatToBottom()
+  if (!chatSessionId.value && generatedResult.value?.sql) {
+    isChatInitializing.value = true
+    try {
+      const res = await $fetch<any>('/api/ai-query/chat-direct-init', {
+        method: 'POST',
+        body: { sql: generatedResult.value.sql }
+      })
+      chatSessionId.value = res.sessionId
+    } catch {
+      toast.error('โหลดข้อมูลไม่สำเร็จ', 'ไม่สามารถเตรียมข้อมูลสำหรับ AI ได้')
+    } finally {
+      isChatInitializing.value = false
+    }
+  }
 }
 
 const resetChat = () => {
   chatMessages.value = []
   chatInput.value = ''
+  chatSessionId.value = null
   chatChartRegistry.clear()
 }
 
@@ -248,7 +265,7 @@ const sendQuickReply = (q: string) => {
 
 const sendChatMessage = async () => {
   const msg = chatInput.value.trim()
-  if (!msg || isChatLoading.value) return
+  if (!msg || isChatLoading.value || isChatInitializing.value || !chatSessionId.value) return
   chatInput.value = ''
   chatMessages.value.push({ role: 'user', content: msg })
   isChatLoading.value = true
@@ -258,9 +275,8 @@ const sendChatMessage = async () => {
     const res = await $fetch<any>('/api/ai-query/chat-direct', {
       method: 'POST',
       body: {
-        sql: generatedResult.value?.sql || '',
+        sessionId: chatSessionId.value,
         queryText: prompt.value,
-        previewData: generatedResult.value?.previewData || [],
         userMessage: msg,
         messages: history
       }
@@ -2124,8 +2140,14 @@ const highlightSql = (sqlStr: string) => {
               <!-- Messages area -->
               <div ref="chatScrollRef" class="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar">
 
+                <!-- Initializing -->
+                <div v-if="isChatInitializing" class="flex flex-col items-center justify-center h-full gap-4">
+                  <Loader2 class="w-10 h-10 text-violet-500 animate-spin" />
+                  <p class="text-sm font-medium text-slate-500 dark:text-slate-400">กำลังโหลดข้อมูลทั้งหมด...</p>
+                </div>
+
                 <!-- Empty state + Suggested questions -->
-                <div v-if="chatMessages.length === 0 && !isChatLoading" class="flex flex-col items-center justify-center h-full gap-6">
+                <div v-else-if="chatMessages.length === 0 && !isChatLoading" class="flex flex-col items-center justify-center h-full gap-6">
                   <div class="text-center">
                     <div class="w-16 h-16 rounded-2xl bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center mx-auto mb-4">
                       <BrainCircuit class="w-8 h-8 text-violet-500" />

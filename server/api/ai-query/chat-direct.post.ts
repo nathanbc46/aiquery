@@ -2,17 +2,23 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { useDb } from '../../utils/db';
 import { aiSettings } from '../../utils/schema';
 import { eq } from 'drizzle-orm';
+import { getAuthSession } from '../../utils/auth';
 import {
   DEFAULT_CHAT_MODEL,
   DEFAULT_CHAT_INSTRUCTION
 } from '../../utils/constants';
 
 export default defineEventHandler(async (event) => {
-  const body = await readBody(event);
-  const { sql, queryText, previewData, userMessage, messages } = body;
+  const session = await getAuthSession(event);
+  if (!session.userId) {
+    throw createError({ statusCode: 401, statusMessage: 'Unauthorized' });
+  }
 
-  if (!userMessage) {
-    throw createError({ statusCode: 400, statusMessage: 'Missing userMessage' });
+  const body = await readBody(event);
+  const { sessionId, queryText, userMessage, messages } = body;
+
+  if (!userMessage || !sessionId) {
+    throw createError({ statusCode: 400, statusMessage: 'Missing sessionId or userMessage' });
   }
 
   const apiKey = process.env.GEMINI_API_KEY;
@@ -29,16 +35,32 @@ export default defineEventHandler(async (event) => {
       chatSystemInstruction: DEFAULT_CHAT_INSTRUCTION
     };
 
-    // สร้าง context จาก previewData ที่ส่งมาโดยตรง
-    const rows: any[] = Array.isArray(previewData) ? previewData : [];
-    const columns = rows.length > 0 ? Object.keys(rows[0]) : [];
+    // อ่านข้อมูลจาก snapshot ที่ init ไว้แล้ว
+    const storage = useStorage('snapshots');
+    const csv: any = await storage.getItem(`chat-direct-${sessionId}.csv`);
+
+    if (!csv) {
+      throw createError({ statusCode: 404, statusMessage: 'Session หมดอายุหรือไม่พบข้อมูล กรุณาเปิด Modal ใหม่อีกครั้ง' });
+    }
+
+    const lines = csv.split('\n').filter((l: string) => l.trim() !== '');
+    const columns = lines[0] ? lines[0].split(',') : [];
+    const rows = lines.slice(1).map((line: string) => {
+      const values = line.split(',');
+      const obj: any = {};
+      columns.forEach((col: string, index: number) => {
+        obj[col.trim()] = values[index] ? values[index].trim() : '-';
+      });
+      return obj;
+    });
+
     const totalCount = rows.length;
 
     const dataContext = rows.length === 0
       ? 'ไม่พบข้อมูล'
       : [
           `คอลัมน์: ${columns.join(', ')}`,
-          `จำนวนแถวใน Preview: ${totalCount} แถว`,
+          `จำนวนแถวทั้งหมด: ${totalCount} แถว`,
           '',
           rows.map((row: any, i: number) =>
             `[${i + 1}] ${columns.map((col: string) => `${col}: ${row[col] ?? '-'}`).join(' | ')}`
