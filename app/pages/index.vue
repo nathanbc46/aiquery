@@ -99,6 +99,7 @@ const zohoSuccessDone = ref(false)
 
 // AI Chat (Admin) state
 const isChatModalOpen = ref(false)
+const isChatFullscreen = ref(false)
 const chatMessages = ref<Array<{ role: 'user' | 'model'; content: string }>>([])
 const chatInput = ref('')
 const isChatLoading = ref(false)
@@ -120,7 +121,7 @@ const renderChatMarkdown = (text: string): string => {
   let html = text.replace(/```chart\n([\s\S]*?)\n```/gim, (_, json) => {
     try {
       const config = JSON.parse(json)
-      const id = `chat-chart-${chatHashStr(json + Date.now() + Math.random())}`
+      const id = `chat-chart-${chatHashStr(json)}`
       chatChartRegistry.set(id, config)
       entries.push({ id })
       return `__CHART_${entries.length - 1}__`
@@ -194,11 +195,25 @@ const scrollChatToBottom = () => {
   })
 }
 
+watch(chatMessages, () => {
+  renderChatApexCharts()
+}, { deep: true, flush: 'post' })
+
+watch(isChatFullscreen, () => {
+  renderChatApexCharts()
+}, { flush: 'post' })
+
 const openChatModal = () => {
   chatMessages.value = []
   chatInput.value = ''
   chatChartRegistry.clear()
+  isChatFullscreen.value = false
   isChatModalOpen.value = true
+}
+
+const sendQuickReply = (q: string) => {
+  chatInput.value = q
+  sendChatMessage()
 }
 
 const sendChatMessage = async () => {
@@ -2038,8 +2053,17 @@ const highlightSql = (sqlStr: string) => {
     <ClientOnly>
       <Teleport to="body">
         <transition name="modal">
-          <div v-if="isChatModalOpen" class="fixed inset-0 z-[160] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md" @click.self="isChatModalOpen = false">
-            <div class="bg-white dark:bg-slate-900 rounded-[2rem] shadow-2xl w-full max-w-2xl h-[80vh] flex flex-col overflow-hidden border border-slate-200 dark:border-slate-800 animate-in zoom-in-95 duration-200" @click.stop>
+          <div
+            v-if="isChatModalOpen"
+            class="fixed inset-0 z-[160] flex items-center justify-center bg-slate-950/90 backdrop-blur-md"
+            :class="isChatFullscreen ? 'p-0' : 'p-4'"
+            @click.self="isChatModalOpen = false"
+          >
+            <div
+              class="bg-white dark:bg-slate-900 flex flex-col overflow-hidden border border-slate-200 dark:border-slate-800 animate-in zoom-in-95 duration-200 w-full transition-all"
+              :class="isChatFullscreen ? 'h-full max-w-none rounded-none' : 'max-w-2xl h-[85vh] rounded-[2rem] shadow-2xl shadow-violet-500/10'"
+              @click.stop
+            >
               <!-- Header -->
               <div class="px-7 py-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-violet-50/40 dark:bg-violet-900/10 shrink-0">
                 <div class="flex items-center gap-3">
@@ -2053,21 +2077,43 @@ const highlightSql = (sqlStr: string) => {
                     </p>
                   </div>
                 </div>
-                <button @click="isChatModalOpen = false" class="p-2 rounded-xl text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
-                  <X class="w-5 h-5" />
-                </button>
+                <div class="flex items-center gap-1">
+                  <button
+                    @click="isChatFullscreen = !isChatFullscreen"
+                    class="p-2 rounded-xl text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                    :title="isChatFullscreen ? 'ย่อหน้าต่าง' : 'ขยายเต็มจอ'"
+                  >
+                    <Minimize2 v-if="isChatFullscreen" class="w-5 h-5" />
+                    <Maximize2 v-else class="w-5 h-5" />
+                  </button>
+                  <button @click="isChatModalOpen = false" class="p-2 rounded-xl text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
+                    <X class="w-5 h-5" />
+                  </button>
+                </div>
               </div>
 
               <!-- Messages area -->
               <div ref="chatScrollRef" class="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar">
-                <!-- Empty state -->
-                <div v-if="chatMessages.length === 0" class="flex flex-col items-center justify-center h-full text-center gap-4 py-10">
-                  <div class="w-16 h-16 rounded-2xl bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center">
-                    <BrainCircuit class="w-8 h-8 text-violet-500" />
-                  </div>
-                  <div>
+
+                <!-- Empty state + Suggested questions -->
+                <div v-if="chatMessages.length === 0 && !isChatLoading" class="flex flex-col items-center justify-center h-full gap-6">
+                  <div class="text-center">
+                    <div class="w-16 h-16 rounded-2xl bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center mx-auto mb-4">
+                      <BrainCircuit class="w-8 h-8 text-violet-500" />
+                    </div>
                     <p class="text-sm font-black text-slate-700 dark:text-slate-300">ถามอะไรก็ได้เกี่ยวกับข้อมูลชุดนี้</p>
-                    <p class="text-xs text-slate-400 mt-1">เช่น "สรุปให้หน่อย", "แสดงเป็นกราฟ", "ข้อมูลไหนน่าสนใจ"</p>
+                    <p class="text-xs text-slate-400 mt-1">กดคำถามด้านล่าง หรือพิมพ์เองได้เลย</p>
+                  </div>
+                  <!-- Suggested questions -->
+                  <div class="grid grid-cols-2 gap-3 w-full max-w-lg">
+                    <button
+                      v-for="q in ['สรุปภาพรวมข้อมูลนี้', 'มีข้อมูลไหนผิดปกติไหม?', 'ช่วยสร้างตารางสรุปยอดให้ที', 'วิเคราะห์แนวโน้มสำคัญ']"
+                      :key="q"
+                      @click="sendQuickReply(q)"
+                      class="px-4 py-3 bg-slate-50 dark:bg-slate-800 hover:bg-violet-50 dark:hover:bg-violet-900/30 border border-slate-200 dark:border-slate-700 hover:border-violet-300 dark:hover:border-violet-700 rounded-2xl text-xs font-medium text-slate-600 dark:text-slate-300 hover:text-violet-700 dark:hover:text-violet-300 transition-all text-left leading-relaxed"
+                    >
+                      {{ q }}
+                    </button>
                   </div>
                 </div>
 
@@ -2084,7 +2130,10 @@ const highlightSql = (sqlStr: string) => {
                     <div class="w-8 h-8 rounded-xl bg-violet-100 dark:bg-violet-900/40 flex items-center justify-center text-violet-600 dark:text-violet-400 shrink-0 mt-1">
                       <BrainCircuit class="w-4 h-4" />
                     </div>
-                    <div class="max-w-[85%] px-5 py-3 bg-slate-100 dark:bg-slate-800 rounded-2xl rounded-tl-sm text-sm text-slate-800 dark:text-slate-200 leading-relaxed shadow-sm" v-html="renderChatMarkdown(msg.content)"></div>
+                    <div
+                      class="min-w-0 flex-1 px-5 py-3 bg-slate-100 dark:bg-slate-800 rounded-2xl rounded-tl-sm text-sm text-slate-800 dark:text-slate-200 leading-relaxed shadow-sm"
+                      v-html="renderChatMarkdown(msg.content)"
+                    ></div>
                   </div>
                 </template>
 

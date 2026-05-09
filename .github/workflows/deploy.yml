@@ -19,6 +19,7 @@ jobs:
           script: |
             cd ~/aiquery
             git pull origin main
+            docker compose build
             docker compose down
-            docker compose up --build -d
+            docker compose up -d
             docker image prune -f
