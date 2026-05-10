@@ -187,7 +187,8 @@ const downloadSelectedPdf = async () => {
     a.click()
     URL.revokeObjectURL(url)
   } catch (e: any) {
-    toast.error('สร้าง PDF ล้มเหลว', e?.message || 'ไม่สามารถสร้าง PDF ได้')
+    console.error('PDF generation error:', e)
+    toast.error('สร้าง PDF ล้มเหลว', e?.message || String(e) || 'ไม่สามารถสร้าง PDF ได้')
   } finally {
     isGeneratingPdf.value = false
   }
