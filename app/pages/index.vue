@@ -195,7 +195,10 @@ const sendSelectedEmail = async () => {
     const blob = await generateChatPdf(selectedMessages.value, chatContextLabel.value, chartSvgs)
     const base64 = await new Promise<string>((res, rej) => {
       const reader = new FileReader()
-      reader.onload = () => res((reader.result as string).split(',')[1])
+      reader.onload = () => {
+        const result = reader.result as string
+        res(result.split(',')[1] || '')
+      }
       reader.onerror = rej
       reader.readAsDataURL(blob)
     })
