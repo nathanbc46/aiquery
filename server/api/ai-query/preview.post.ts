@@ -23,7 +23,7 @@ export default defineEventHandler(async (event) => {
 
   // Security: Basic check for read-only
   const upperSql = query.trim().toUpperCase()
-  if (!upperSql.startsWith('SELECT')) {
+  if (!upperSql.startsWith('SELECT') && !upperSql.startsWith('WITH')) {
     throw createError({
       statusCode: 403,
       statusMessage: 'Only SELECT queries are allowed for preview'

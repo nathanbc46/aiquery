@@ -103,8 +103,8 @@ const closeMobileMenu = () => {
 <template>
   <div class="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col lg:flex-row font-sans text-slate-800 dark:text-slate-200 transition-colors duration-500 overflow-x-hidden relative">
     
-    <!-- Background Blobs (Vivid Edition) -->
-    <div class="fixed inset-0 overflow-hidden pointer-events-none z-0">
+    <!-- Background Blobs (Desktop only — heavy GPU on mobile) -->
+    <div class="hidden lg:block fixed inset-0 overflow-hidden pointer-events-none z-0">
       <div class="absolute -top-40 -left-40 w-[500px] h-[500px] bg-blue-400/25 dark:bg-blue-600/20 rounded-full blur-[120px] animate-blob"></div>
       <div class="absolute top-1/4 -right-40 w-[600px] h-[600px] bg-indigo-400/25 dark:bg-indigo-600/20 rounded-full blur-[140px] animate-blob animation-delay-2000"></div>
       <div class="absolute -bottom-40 left-1/3 w-[500px] h-[500px] bg-purple-400/25 dark:bg-purple-600/20 rounded-full blur-[100px] animate-blob animation-delay-4000"></div>
@@ -413,13 +413,12 @@ body {
 
 .page-enter-active,
 .page-leave-active {
-  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: opacity 0.25s ease, transform 0.25s ease;
 }
 .page-enter-from,
 .page-leave-to {
   opacity: 0;
-  transform: translateY(10px);
-  filter: blur(10px);
+  transform: translateY(8px);
 }
 
 .fade-enter-active, .fade-leave-active { transition: opacity 0.3s; }

@@ -39,7 +39,7 @@ export default defineEventHandler(async (event) => {
     } else {
       // ข้อมูลมีมากกว่า preview — query DB เต็ม
       const upperSql = querySql.trim().toUpperCase();
-      if (!upperSql.startsWith('SELECT')) {
+      if (!upperSql.startsWith('SELECT') && !upperSql.startsWith('WITH')) {
         throw createError({ statusCode: 403, statusMessage: 'Only SELECT queries are allowed' });
       }
 

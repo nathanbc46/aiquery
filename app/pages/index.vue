@@ -33,7 +33,10 @@ import {
   CheckCircle2,
   Lightbulb,
   Send,
-  MessageSquare
+  MessageSquare,
+  ChevronDown,
+  Volume2,
+  VolumeX
 } from 'lucide-vue-next'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
@@ -107,6 +110,37 @@ const isChatInitializing = ref(false)
 const chatSessionId = ref<string | null>(null)
 const chatScrollRef = ref<HTMLElement | null>(null)
 const chatChartRegistry = new Map<string, any>()
+
+// Text-to-Speech
+const speakingIdx = ref<number | null>(null)
+
+const stripHtml = (html: string) => {
+  const tmp = document.createElement('div')
+  tmp.innerHTML = html
+  return tmp.textContent || tmp.innerText || ''
+}
+
+const speakMessage = (content: string, idx: number) => {
+  if (!window.speechSynthesis) return
+  if (speakingIdx.value === idx) {
+    window.speechSynthesis.cancel()
+    speakingIdx.value = null
+    return
+  }
+  window.speechSynthesis.cancel()
+  const text = stripHtml(content).replace(/[#*`_~]/g, '').trim()
+  const utt = new SpeechSynthesisUtterance(text)
+  utt.lang = 'th-TH'
+  utt.rate = 1.05
+  speakingIdx.value = idx
+  utt.onend = () => { speakingIdx.value = null }
+  utt.onerror = () => { speakingIdx.value = null }
+  window.speechSynthesis.speak(utt)
+}
+
+onUnmounted(() => {
+  if (window.speechSynthesis) window.speechSynthesis.cancel()
+})
 
 // Chat helpers
 const chatHashStr = (str: string): string => {
@@ -211,9 +245,14 @@ const renderChatApexCharts = async () => {
   })
 }
 
-const scrollChatToBottom = () => {
+const scrollToLastMessage = () => {
   nextTick(() => {
-    if (chatScrollRef.value) {
+    if (!chatScrollRef.value) return
+    const messages = chatScrollRef.value.querySelectorAll('.chat-message')
+    if (messages.length > 0) {
+      const last = messages[messages.length - 1] as HTMLElement
+      chatScrollRef.value.scrollTop = last.offsetTop - 16
+    } else {
       chatScrollRef.value.scrollTop = chatScrollRef.value.scrollHeight
     }
   })
@@ -228,9 +267,9 @@ watch(isChatFullscreen, () => {
 }, { flush: 'post' })
 
 const openChatModal = async () => {
-  isChatFullscreen.value = false
+  isChatFullscreen.value = true
   isChatModalOpen.value = true
-  scrollChatToBottom()
+  scrollToLastMessage()
   if (!chatSessionId.value && generatedResult.value?.sql) {
     const preview = generatedResult.value.previewData ?? []
     const total = generatedResult.value.previewCount ?? 0
@@ -253,6 +292,7 @@ const openChatModal = async () => {
 const resetChat = () => {
   chatMessages.value = []
   chatInput.value = ''
+  showChatSuggest.value = false
   chatChartRegistry.clear()
   if (chatSessionId.value) {
     $fetch('/api/ai-query/chat-direct-session', {
@@ -267,7 +307,10 @@ watch(generatedResult, (newVal, oldVal) => {
   if (!newVal || (oldVal && newVal !== oldVal)) resetChat()
 })
 
+const showChatSuggest = ref(false)
+
 const sendQuickReply = (q: string) => {
+  showChatSuggest.value = false
   chatInput.value = q
   sendChatMessage()
 }
@@ -278,7 +321,7 @@ const sendChatMessage = async () => {
   chatInput.value = ''
   chatMessages.value.push({ role: 'user', content: msg })
   isChatLoading.value = true
-  scrollChatToBottom()
+  scrollToLastMessage()
   try {
     const history = chatMessages.value.slice(0, -1).map(m => ({ role: m.role, content: m.content }))
     const res = await $fetch<any>('/api/ai-query/chat-direct', {
@@ -292,10 +335,10 @@ const sendChatMessage = async () => {
     })
     chatMessages.value.push({ role: 'model', content: res.reply })
     await renderChatApexCharts()
-    scrollChatToBottom()
+    scrollToLastMessage()
   } catch (err: any) {
     chatMessages.value.push({ role: 'model', content: `เกิดข้อผิดพลาด: ${err?.data?.message || err.message || 'ไม่สามารถติดต่อ AI ได้'}` })
-    scrollChatToBottom()
+    scrollToLastMessage()
   } finally {
     isChatLoading.value = false
   }
@@ -443,11 +486,16 @@ const confirmDeleteFavorite = async () => {
   }
 }
 
+const submitBtnRef = ref<HTMLElement | null>(null)
+
 const useFavorite = (fav: any) => {
   prompt.value = fav.queryText
-  // Optionally auto-run, but better to let user review first
-  toast.info('โหลดรายการโปรด', `ใช้คำค้นหา: ${fav.title}`)
   focusAndEnd()
+  if (window.innerWidth < 1024) {
+    nextTick(() => {
+      submitBtnRef.value?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    })
+  }
 }
 
 onMounted(() => {
@@ -496,6 +544,16 @@ const fetchDataGuide = async () => {
 const renderedDataGuide = computed(() => {
   if (!dataGuideContent.value) return ''
   return DOMPurify.sanitize(marked.parse(dataGuideContent.value) as string)
+})
+
+const chatContextLabel = computed(() => {
+  const preview = generatedResult.value?.previewData ?? []
+  const total = generatedResult.value?.previewCount ?? 0
+  const allInPreview = preview.length > 0 && preview.length >= total
+  if (allInPreview) {
+    return `${total} รายการ · ข้อมูลครบใน context`
+  }
+  return `${total} รายการ · AI เห็นข้อมูลครบทั้งหมด`
 })
 
 const renderedExplanation = computed(() => {
@@ -993,7 +1051,7 @@ const highlightSql = (sqlStr: string) => {
     </header>
 
     <!-- Input Box (Action Zone) -->
-    <section class="rounded-[2.5rem] overflow-hidden transition-all duration-500 hover:shadow-indigo-500/10 relative z-10 border border-indigo-100 dark:border-indigo-900/30 bg-slate-100/90 dark:bg-slate-900/90 backdrop-blur-xl shadow-2xl">
+    <section class="rounded-[2.5rem] overflow-hidden transition-all duration-500 hover:shadow-indigo-500/10 relative z-10 border border-indigo-100 dark:border-indigo-900/30 bg-slate-100/90 dark:bg-slate-900/90 lg:backdrop-blur-xl shadow-2xl">
       <form @submit.prevent="generateSql" class="p-8 md:p-10 space-y-6">
         <div class="space-y-6">
           <div class="flex items-center justify-between px-1">
@@ -1143,9 +1201,10 @@ const highlightSql = (sqlStr: string) => {
               เขียน SQL เอง
             </button>
 
-            <button 
+            <button
               v-if="!isGenerating"
-              type="submit" 
+              ref="submitBtnRef"
+              type="submit"
               :disabled="!prompt"
               class="relative group px-12 py-5 bg-gradient-to-r from-slate-900 to-slate-800 dark:from-blue-600 dark:to-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed text-white font-black rounded-[2rem] shadow-2xl shadow-blue-500/30 transition-all flex items-center justify-center gap-3 active:scale-95 shrink-0 overflow-hidden uppercase tracking-widest text-sm"
             >
@@ -2127,7 +2186,7 @@ const highlightSql = (sqlStr: string) => {
                   <div>
                     <h3 class="text-base font-black text-slate-900 dark:text-white">แชตถาม AI จากข้อมูลนี้</h3>
                     <p class="text-[10px] font-bold text-violet-600/60 dark:text-violet-400/60 uppercase tracking-widest">
-                      {{ generatedResult?.previewCount ?? 0 }} รายการ · {{ generatedResult?.previewData?.length ?? 0 }} rows ใน context
+                      {{ chatContextLabel }}
                     </p>
                   </div>
                 </div>
@@ -2146,8 +2205,19 @@ const highlightSql = (sqlStr: string) => {
                 </div>
               </div>
 
-              <!-- Messages area -->
-              <div ref="chatScrollRef" class="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar">
+              <!-- Messages area wrapper -->
+              <div class="flex-1 relative overflow-hidden">
+              <!-- Scroll to last message button -->
+              <button
+                v-if="chatMessages.length > 0"
+                @click="scrollToLastMessage"
+                class="absolute bottom-4 right-4 z-10 w-9 h-9 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-full shadow-lg flex items-center justify-center text-slate-500 dark:text-slate-400 hover:text-violet-600 dark:hover:text-violet-400 hover:border-violet-400 transition-all"
+                title="เลื่อนไปข้อความล่าสุด"
+              >
+                <ChevronDown class="w-4 h-4" />
+              </button>
+              <!-- Messages scroll area -->
+              <div ref="chatScrollRef" class="h-full overflow-y-auto p-6 space-y-4 custom-scrollbar">
 
                 <!-- Initializing -->
                 <div v-if="isChatInitializing" class="flex flex-col items-center justify-center h-full gap-4">
@@ -2180,20 +2250,36 @@ const highlightSql = (sqlStr: string) => {
                 <!-- Chat bubbles -->
                 <template v-for="(msg, idx) in chatMessages" :key="idx">
                   <!-- User bubble -->
-                  <div v-if="msg.role === 'user'" class="flex justify-end">
+                  <div v-if="msg.role === 'user'" class="chat-message flex justify-end">
                     <div class="max-w-[80%] px-5 py-3 bg-violet-600 text-white rounded-2xl rounded-tr-sm text-sm font-medium leading-relaxed shadow-md shadow-violet-500/20">
                       {{ msg.content }}
                     </div>
                   </div>
                   <!-- AI bubble -->
-                  <div v-else class="flex justify-start gap-3">
+                  <div v-else class="chat-message flex justify-start gap-3 group/msg">
                     <div class="w-8 h-8 rounded-xl bg-violet-100 dark:bg-violet-900/40 flex items-center justify-center text-violet-600 dark:text-violet-400 shrink-0 mt-1">
                       <BrainCircuit class="w-4 h-4" />
                     </div>
-                    <div
-                      class="min-w-0 flex-1 px-5 py-3 bg-slate-100 dark:bg-slate-800 rounded-2xl rounded-tl-sm text-sm text-slate-800 dark:text-slate-200 leading-relaxed shadow-sm"
-                      v-html="renderChatMarkdown(msg.content)"
-                    ></div>
+                    <div class="min-w-0 flex-1 flex flex-col gap-1">
+                      <div
+                        class="px-5 py-3 bg-slate-100 dark:bg-slate-800 rounded-2xl rounded-tl-sm text-sm text-slate-800 dark:text-slate-200 leading-relaxed shadow-sm"
+                        v-html="renderChatMarkdown(msg.content)"
+                      ></div>
+                      <div class="flex items-center px-1">
+                        <button
+                          @click="speakMessage(msg.content, idx)"
+                          class="flex items-center gap-1.5 px-2 py-1 rounded-lg text-[10px] font-bold transition-all opacity-0 group-hover/msg:opacity-100 focus:opacity-100"
+                          :class="speakingIdx === idx
+                            ? 'text-violet-600 dark:text-violet-400 bg-violet-50 dark:bg-violet-900/30'
+                            : 'text-slate-400 hover:text-violet-600 dark:hover:text-violet-400 hover:bg-violet-50 dark:hover:bg-violet-900/20'"
+                          :title="speakingIdx === idx ? 'หยุดอ่าน' : 'อ่านออกเสียง'"
+                        >
+                          <VolumeX v-if="speakingIdx === idx" class="w-3.5 h-3.5" />
+                          <Volume2 v-else class="w-3.5 h-3.5" />
+                          <span>{{ speakingIdx === idx ? 'หยุด' : 'อ่าน' }}</span>
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 </template>
 
@@ -2209,10 +2295,36 @@ const highlightSql = (sqlStr: string) => {
                   </div>
                 </div>
               </div>
+              </div>
 
               <!-- Input area -->
-              <div class="p-4 border-t border-slate-100 dark:border-slate-800 shrink-0 bg-slate-50/50 dark:bg-slate-900/50">
-                <div class="flex items-end gap-3">
+              <div class="border-t border-slate-100 dark:border-slate-800 shrink-0 bg-slate-50/50 dark:bg-slate-900/50">
+                <!-- Quick suggest panel -->
+                <transition name="suggest">
+                  <div v-if="showChatSuggest && chatMessages.length > 0" class="px-4 pt-3 pb-1 grid grid-cols-2 gap-2">
+                    <button
+                      v-for="q in ['สรุปภาพรวมข้อมูลนี้', 'มีข้อมูลไหนผิดปกติไหม?', 'ช่วยสร้างตารางสรุปยอดให้ที', 'วิเคราะห์แนวโน้มสำคัญ']"
+                      :key="q"
+                      @click="sendQuickReply(q)"
+                      :disabled="isChatLoading"
+                      class="px-3 py-2 bg-white dark:bg-slate-800 hover:bg-violet-50 dark:hover:bg-violet-900/30 border border-slate-200 dark:border-slate-700 hover:border-violet-300 dark:hover:border-violet-700 rounded-xl text-xs font-medium text-slate-600 dark:text-slate-300 hover:text-violet-700 dark:hover:text-violet-300 transition-all text-left leading-snug disabled:opacity-40"
+                    >
+                      {{ q }}
+                    </button>
+                  </div>
+                </transition>
+                <div class="p-4 flex items-end gap-2">
+                  <button
+                    v-if="chatMessages.length > 0"
+                    @click="showChatSuggest = !showChatSuggest"
+                    class="p-3 rounded-2xl transition-all shrink-0 border"
+                    :class="showChatSuggest
+                      ? 'bg-violet-100 dark:bg-violet-900/40 text-violet-600 dark:text-violet-400 border-violet-200 dark:border-violet-800'
+                      : 'bg-white dark:bg-slate-800 text-slate-400 hover:text-violet-500 border-slate-200 dark:border-slate-700 hover:border-violet-300'"
+                    title="แนะนำคำถาม"
+                  >
+                    <Lightbulb class="w-5 h-5" />
+                  </button>
                   <textarea
                     v-model="chatInput"
                     placeholder="ถามเกี่ยวกับข้อมูลชุดนี้... (Enter เพื่อส่ง, Shift+Enter ขึ้นบรรทัด)"
@@ -2451,6 +2563,17 @@ const highlightSql = (sqlStr: string) => {
 }
 .modal-enter-from > div, .modal-leave-to > div {
   transform: scale(0.9) translateY(30px);
+}
+
+.suggest-enter-active, .suggest-leave-active {
+  transition: opacity 0.2s ease, transform 0.2s ease, max-height 0.25s ease;
+  overflow: hidden;
+  max-height: 200px;
+}
+.suggest-enter-from, .suggest-leave-to {
+  opacity: 0;
+  transform: translateY(6px);
+  max-height: 0;
 }
 
 @keyframes shimmer {
