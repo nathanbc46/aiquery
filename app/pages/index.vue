@@ -45,6 +45,7 @@ import {
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import ApexCharts from 'apexcharts'
+import 'apexcharts/features/exports'
 
 
 const prompt = ref('')
@@ -136,18 +137,18 @@ const toggleSelectMsg = (idx: number) => {
   selectedMsgIdxs.value = s
 }
 
-// ดึง SVG ของกราฟพร้อม legend ผ่าน ApexCharts dataURI() — ได้ vector ขนาดเล็กกว่า PNG มาก
+// ดึง PNG ของกราฟพร้อม legend ผ่าน ApexCharts dataURI() ที่ 1x scale — เล็กกว่า canvas 3x มาก
 const collectChartSvgs = async (): Promise<Map<string, { svgString: string; ratio: number }>> => {
   const result = new Map<string, { svgString: string; ratio: number }>()
   for (const [id, instance] of chatChartInstances.entries()) {
     try {
-      const { svg } = await instance.dataURI({ svg: true }) as { svg: string }
+      const { imgURI } = await instance.dataURI() as { imgURI: string }
       const el = document.querySelector(`.apex-chat-chart[data-chart-id="${id}"]`) as HTMLElement | null
       const w = el?.clientWidth || 580
       const h = el?.clientHeight || 300
-      result.set(id, { svgString: svg, ratio: h / w })
+      result.set(id, { svgString: imgURI, ratio: h / w })
     } catch (e) {
-      console.warn('Chart SVG export failed:', id, e)
+      console.warn('Chart export failed:', id, e)
     }
   }
   return result

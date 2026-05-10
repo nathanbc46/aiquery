@@ -2,7 +2,6 @@
 // ต้องวางไฟล์ THSarabunNew.ttf ไว้ที่ public/fonts/THSarabunNew.ttf
 import { jsPDF } from 'jspdf'
 import { applyPlugin } from 'jspdf-autotable'
-import { svg2pdf } from 'svg2pdf.js'
 
 applyPlugin(jsPDF)
 
@@ -240,21 +239,7 @@ async function renderAiBubble(
         const chartW = RIGHT - LEFT - 4
         const chartH = Math.min(chartW * svgInfo.ratio, 90)
         y = ensureSpace(doc, y, chartH + 4)
-
-        const parser = new DOMParser()
-        const svgDoc = parser.parseFromString(svgInfo.svgString, 'image/svg+xml')
-        const svgEl = svgDoc.documentElement as unknown as SVGSVGElement
-
-        // svg2pdf ต้องการ element ใน DOM
-        const container = document.createElement('div')
-        container.style.cssText = 'position:absolute;visibility:hidden;pointer-events:none'
-        container.appendChild(svgEl)
-        document.body.appendChild(container)
-        try {
-          await svg2pdf(svgEl, doc, { x: LEFT + 2, y, width: chartW, height: chartH })
-        } finally {
-          document.body.removeChild(container)
-        }
+        doc.addImage(svgInfo.svgString, 'PNG', LEFT + 2, y, chartW, chartH)
         y += chartH + 5
       }
     }
