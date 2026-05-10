@@ -1,5 +1,7 @@
 // PDF generation utility สำหรับ export chat messages
 // ต้องวางไฟล์ THSarabunNew.ttf ไว้ที่ public/fonts/THSarabunNew.ttf
+import { jsPDF } from 'jspdf'
+import 'jspdf-autotable'
 
 type Segment =
   | { type: 'text'; content: string }
@@ -260,9 +262,6 @@ export async function generateChatPdf(
   chatContextLabel: string,
   chartImages: Map<string, string>
 ): Promise<Blob> {
-  const { jsPDF } = await import('jspdf')
-  await import('jspdf-autotable')
-
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
 
   const useThaiFont = await loadThaiFont(doc)
