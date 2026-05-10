@@ -2,7 +2,6 @@
 // ต้องวางไฟล์ THSarabunNew.ttf ไว้ที่ public/fonts/THSarabunNew.ttf
 import { jsPDF } from 'jspdf'
 import { applyPlugin } from 'jspdf-autotable'
-import { svg2pdf } from 'svg2pdf.js'
 
 applyPlugin(jsPDF)
 
@@ -180,11 +179,11 @@ function renderUserBubble(doc: any, content: string, y: number, useThaiFont: boo
   return y + boxH + 5
 }
 
-// วาด AI message (รับ segments พร้อม SVG elements)
+// วาด AI message (รับ segments พร้อม chart PNG map)
 async function renderAiBubble(
   doc: any,
   segments: Segment[],
-  chartSvgs: Map<string, SVGSVGElement>,
+  chartImages: Map<string, string>,
   y: number,
   useThaiFont: boolean
 ): Promise<number> {
@@ -235,16 +234,15 @@ async function renderAiBubble(
       y = (doc as any).lastAutoTable.finalY + 5
 
     } else if (seg.type === 'chart') {
-      const svgEl = chartSvgs.get(seg.id)
-      if (svgEl) {
+      const imgURI = chartImages.get(seg.id)
+      if (imgURI) {
         const chartW = RIGHT - LEFT - 4
-        const chartH = 70
+        // คำนวณ height จาก aspect ratio จริงของกราฟ
+        const aspectInfo = chartImages.get(seg.id + '_ratio')
+        const ratio = aspectInfo ? parseFloat(aspectInfo) : 0.5
+        const chartH = Math.min(chartW * ratio, 90)
         y = ensureSpace(doc, y, chartH + 4)
-        try {
-          await svg2pdf(svgEl, doc, { x: LEFT + 2, y, width: chartW, height: chartH })
-        } catch (e) {
-          console.warn('svg2pdf failed:', seg.id, e)
-        }
+        doc.addImage(imgURI, 'PNG', LEFT + 2, y, chartW, chartH)
         y += chartH + 5
       }
     }
@@ -268,7 +266,7 @@ function addPageNumbers(doc: any) {
 export async function generateChatPdf(
   selectedMessages: Array<{ role: string; content: string }>,
   chatContextLabel: string,
-  chartSvgs: Map<string, SVGSVGElement>
+  chartImages: Map<string, string>
 ): Promise<Blob> {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
 
@@ -284,7 +282,7 @@ export async function generateChatPdf(
       y = renderUserBubble(doc, msg.content, y, useThaiFont)
     } else {
       const segs = parseMessageSegments(msg.content)
-      y = await renderAiBubble(doc, segs, chartSvgs, y, useThaiFont)
+      y = await renderAiBubble(doc, segs, chartImages, y, useThaiFont)
     }
   }
 

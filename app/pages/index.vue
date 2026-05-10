@@ -136,24 +136,58 @@ const toggleSelectMsg = (idx: number) => {
   selectedMsgIdxs.value = s
 }
 
-// เก็บ SVG element ของกราฟแต่ละอันไว้ส่งให้ svg2pdf
-const collectChartSvgs = (): Map<string, SVGSVGElement> => {
-  const svgs = new Map<string, SVGSVGElement>()
+// จับภาพกราฟเป็น PNG 3x resolution พร้อมเก็บ aspect ratio จริง
+const captureChartImages = async (): Promise<Map<string, string>> => {
+  const images = new Map<string, string>()
   const els = document.querySelectorAll('.apex-chat-chart[data-chart-id]')
   for (const el of Array.from(els)) {
     const id = el.getAttribute('data-chart-id')!
     const svgEl = el.querySelector('svg')
-    if (svgEl) svgs.set(id, svgEl as SVGSVGElement)
+    if (!svgEl) continue
+    try {
+      // ใช้ขนาดจริงของ SVG element
+      const rect = svgEl.getBoundingClientRect()
+      const w = rect.width || (el as HTMLElement).clientWidth || 580
+      const h = rect.height || (el as HTMLElement).clientHeight || 300
+      const scale = 3
+      let svgData = new XMLSerializer().serializeToString(svgEl)
+      if (!svgData.includes('xmlns=')) {
+        svgData = svgData.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"')
+      }
+      const base64 = btoa(unescape(encodeURIComponent(svgData)))
+      const dataUrl = `data:image/svg+xml;base64,${base64}`
+      const canvas = document.createElement('canvas')
+      canvas.width = w * scale
+      canvas.height = h * scale
+      const ctx = canvas.getContext('2d')!
+      ctx.scale(scale, scale)
+      await new Promise<void>((resolve) => {
+        const img = new Image()
+        img.width = w
+        img.height = h
+        img.onload = () => { ctx.drawImage(img, 0, 0, w, h); resolve() }
+        img.onerror = () => resolve()
+        img.src = dataUrl
+      })
+      images.set(id, canvas.toDataURL('image/png'))
+      // เก็บ aspect ratio (height/width) เพื่อให้ PDF คำนวณความสูงถูกต้อง
+      images.set(id + '_ratio', String(h / w))
+    } catch (e) {
+      console.warn('Chart capture failed:', id, e)
+    }
   }
-  return svgs
+  return images
 }
 
 const downloadSelectedPdf = async () => {
   if (!selectedMessages.value.length) return
   isGeneratingPdf.value = true
   try {
-    const { generateChatPdf } = await import('~/utils/chatPdfExport')
-    const blob = await generateChatPdf(selectedMessages.value, chatContextLabel.value, collectChartSvgs())
+    const [{ generateChatPdf }, chartImages] = await Promise.all([
+      import('~/utils/chatPdfExport'),
+      captureChartImages()
+    ])
+    const blob = await generateChatPdf(selectedMessages.value, chatContextLabel.value, chartImages)
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
@@ -179,8 +213,11 @@ const sendSelectedEmail = async () => {
   if (!emailTo.value || isSendingEmail.value) return
   isSendingEmail.value = true
   try {
-    const { generateChatPdf } = await import('~/utils/chatPdfExport')
-    const blob = await generateChatPdf(selectedMessages.value, chatContextLabel.value, collectChartSvgs())
+    const [{ generateChatPdf }, chartImages] = await Promise.all([
+      import('~/utils/chatPdfExport'),
+      captureChartImages()
+    ])
+    const blob = await generateChatPdf(selectedMessages.value, chatContextLabel.value, chartImages)
     const base64 = await new Promise<string>((res, rej) => {
       const reader = new FileReader()
       reader.onload = () => res((reader.result as string).split(',')[1])
