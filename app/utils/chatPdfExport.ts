@@ -2,6 +2,7 @@
 // ต้องวางไฟล์ THSarabunNew.ttf ไว้ที่ public/fonts/THSarabunNew.ttf
 import { jsPDF } from 'jspdf'
 import { applyPlugin } from 'jspdf-autotable'
+import { svg2pdf } from 'svg2pdf.js'
 
 applyPlugin(jsPDF)
 
@@ -179,11 +180,11 @@ function renderUserBubble(doc: any, content: string, y: number, useThaiFont: boo
   return y + boxH + 5
 }
 
-// วาด AI message (รับ segments พร้อม chart PNG map)
+// วาด AI message (รับ segments พร้อม chart SVG map)
 async function renderAiBubble(
   doc: any,
   segments: Segment[],
-  chartImages: Map<string, string>,
+  chartSvgs: Map<string, { svgString: string; ratio: number }>,
   y: number,
   useThaiFont: boolean
 ): Promise<number> {
@@ -234,15 +235,26 @@ async function renderAiBubble(
       y = (doc as any).lastAutoTable.finalY + 5
 
     } else if (seg.type === 'chart') {
-      const imgURI = chartImages.get(seg.id)
-      if (imgURI) {
+      const svgInfo = chartSvgs.get(seg.id)
+      if (svgInfo) {
         const chartW = RIGHT - LEFT - 4
-        // คำนวณ height จาก aspect ratio จริงของกราฟ
-        const aspectInfo = chartImages.get(seg.id + '_ratio')
-        const ratio = aspectInfo ? parseFloat(aspectInfo) : 0.5
-        const chartH = Math.min(chartW * ratio, 90)
+        const chartH = Math.min(chartW * svgInfo.ratio, 90)
         y = ensureSpace(doc, y, chartH + 4)
-        doc.addImage(imgURI, 'PNG', LEFT + 2, y, chartW, chartH)
+
+        const parser = new DOMParser()
+        const svgDoc = parser.parseFromString(svgInfo.svgString, 'image/svg+xml')
+        const svgEl = svgDoc.documentElement as unknown as SVGSVGElement
+
+        // svg2pdf ต้องการ element ใน DOM
+        const container = document.createElement('div')
+        container.style.cssText = 'position:absolute;visibility:hidden;pointer-events:none'
+        container.appendChild(svgEl)
+        document.body.appendChild(container)
+        try {
+          await svg2pdf(svgEl, doc, { x: LEFT + 2, y, width: chartW, height: chartH })
+        } finally {
+          document.body.removeChild(container)
+        }
         y += chartH + 5
       }
     }
@@ -266,7 +278,7 @@ function addPageNumbers(doc: any) {
 export async function generateChatPdf(
   selectedMessages: Array<{ role: string; content: string }>,
   chatContextLabel: string,
-  chartImages: Map<string, string>
+  chartSvgs: Map<string, { svgString: string; ratio: number }>
 ): Promise<Blob> {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
 
@@ -282,7 +294,7 @@ export async function generateChatPdf(
       y = renderUserBubble(doc, msg.content, y, useThaiFont)
     } else {
       const segs = parseMessageSegments(msg.content)
-      y = await renderAiBubble(doc, segs, chartImages, y, useThaiFont)
+      y = await renderAiBubble(doc, segs, chartSvgs, y, useThaiFont)
     }
   }
 
