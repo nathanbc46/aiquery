@@ -113,6 +113,7 @@ const chatChartRegistry = new Map<string, any>()
 
 // Text-to-Speech
 const speakingIdx = ref<number | null>(null)
+let currentUtt: SpeechSynthesisUtterance | null = null
 
 const stripHtml = (html: string) => {
   const tmp = document.createElement('div')
@@ -120,27 +121,36 @@ const stripHtml = (html: string) => {
   return tmp.textContent || tmp.innerText || ''
 }
 
+const stopSpeech = () => {
+  if (!window.speechSynthesis) return
+  currentUtt = null
+  speakingIdx.value = null
+  window.speechSynthesis.pause()
+  window.speechSynthesis.cancel()
+  // Chrome bug: cancel ไม่หยุดทันที ต้อง cancel ซ้ำใน next tick
+  setTimeout(() => window.speechSynthesis.cancel(), 0)
+}
+
 const speakMessage = (content: string, idx: number) => {
   if (!window.speechSynthesis) return
   if (speakingIdx.value === idx) {
-    window.speechSynthesis.cancel()
-    speakingIdx.value = null
+    stopSpeech()
     return
   }
-  window.speechSynthesis.cancel()
+  stopSpeech()
   const text = stripHtml(content).replace(/[#*`_~]/g, '').trim()
   const utt = new SpeechSynthesisUtterance(text)
   utt.lang = 'th-TH'
   utt.rate = 1.05
+  currentUtt = utt
   speakingIdx.value = idx
-  utt.onend = () => { speakingIdx.value = null }
-  utt.onerror = () => { speakingIdx.value = null }
-  window.speechSynthesis.speak(utt)
+  utt.onend = () => { if (currentUtt === utt) { speakingIdx.value = null; currentUtt = null } }
+  utt.onerror = () => { if (currentUtt === utt) { speakingIdx.value = null; currentUtt = null } }
+  // หน่วงเล็กน้อยหลัง cancel เพื่อให้ browser reset ก่อน speak ใหม่
+  setTimeout(() => { if (currentUtt === utt) window.speechSynthesis.speak(utt) }, 50)
 }
 
-onUnmounted(() => {
-  if (window.speechSynthesis) window.speechSynthesis.cancel()
-})
+onUnmounted(() => { stopSpeech() })
 
 // Chat helpers
 const chatHashStr = (str: string): string => {
@@ -265,6 +275,14 @@ watch(chatMessages, () => {
 watch(isChatFullscreen, () => {
   renderChatApexCharts()
 }, { flush: 'post' })
+
+watch(isChatModalOpen, (open) => {
+  if (!open) {
+    stopSpeech()
+  } else {
+    renderChatApexCharts()
+  }
+})
 
 const openChatModal = async () => {
   isChatFullscreen.value = true
