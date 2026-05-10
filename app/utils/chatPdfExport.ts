@@ -179,7 +179,7 @@ function renderUserBubble(doc: any, content: string, y: number, useThaiFont: boo
 async function renderAiBubble(
   doc: any,
   segments: Segment[],
-  chartInstances: Map<string, any>,
+  chartImages: Map<string, string>,
   y: number,
   useThaiFont: boolean
 ): Promise<number> {
@@ -230,17 +230,12 @@ async function renderAiBubble(
       y = (doc as any).lastAutoTable.finalY + 5
 
     } else if (seg.type === 'chart') {
-      const instance = chartInstances.get(seg.id)
-      if (instance) {
-        try {
-          const { imgURI } = await instance.dataURI({ type: 'png', quality: 0.9 })
-          const imgH = 70
-          y = ensureSpace(doc, y, imgH + 4)
-          doc.addImage(imgURI, 'PNG', LEFT + 2, y, RIGHT - LEFT - 4, imgH)
-          y += imgH + 5
-        } catch (e) {
-          console.warn('Chart export failed:', seg.id, e)
-        }
+      const imgURI = chartImages.get(seg.id)
+      if (imgURI) {
+        const imgH = 70
+        y = ensureSpace(doc, y, imgH + 4)
+        doc.addImage(imgURI, 'PNG', LEFT + 2, y, RIGHT - LEFT - 4, imgH)
+        y += imgH + 5
       }
     }
   }
@@ -263,14 +258,13 @@ function addPageNumbers(doc: any) {
 export async function generateChatPdf(
   selectedMessages: Array<{ role: string; content: string }>,
   chatContextLabel: string,
-  chatChartInstances: Map<string, any>
+  chartImages: Map<string, string>
 ): Promise<Blob> {
   const { jsPDF } = await import('jspdf')
   await import('jspdf-autotable')
 
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
 
-  // โหลด Thai font — ถ้าไม่มีไฟล์ใช้ helvetica แทน
   const useThaiFont = await loadThaiFont(doc)
 
   drawPdfHeader(doc, chatContextLabel, selectedMessages.length)
@@ -283,7 +277,7 @@ export async function generateChatPdf(
       y = renderUserBubble(doc, msg.content, y, useThaiFont)
     } else {
       const segs = parseMessageSegments(msg.content)
-      y = await renderAiBubble(doc, segs, chatChartInstances, y, useThaiFont)
+      y = await renderAiBubble(doc, segs, chartImages, y, useThaiFont)
     }
   }
 

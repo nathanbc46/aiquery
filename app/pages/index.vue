@@ -45,7 +45,6 @@ import {
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import ApexCharts from 'apexcharts'
-import 'apexcharts/features/exports'
 
 
 const prompt = ref('')
@@ -137,12 +136,46 @@ const toggleSelectMsg = (idx: number) => {
   selectedMsgIdxs.value = s
 }
 
+// จับภาพกราฟทุกอันใน DOM เป็น PNG data URL ก่อนสร้าง PDF
+const captureChartImages = async (): Promise<Map<string, string>> => {
+  const images = new Map<string, string>()
+  const els = document.querySelectorAll('.apex-chat-chart[data-chart-id]')
+  for (const el of Array.from(els)) {
+    const id = el.getAttribute('data-chart-id')!
+    const svgEl = el.querySelector('svg')
+    if (!svgEl) continue
+    try {
+      const svgData = new XMLSerializer().serializeToString(svgEl)
+      const canvas = document.createElement('canvas')
+      canvas.width = (el as HTMLElement).clientWidth || 580
+      canvas.height = (el as HTMLElement).clientHeight || 300
+      const ctx = canvas.getContext('2d')!
+      const blob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' })
+      const url = URL.createObjectURL(blob)
+      await new Promise<void>((resolve) => {
+        const img = new Image()
+        img.onload = () => { ctx.drawImage(img, 0, 0, canvas.width, canvas.height); resolve() }
+        img.onerror = () => resolve()
+        img.src = url
+      })
+      URL.revokeObjectURL(url)
+      images.set(id, canvas.toDataURL('image/png'))
+    } catch (e) {
+      console.warn('Chart capture failed:', id, e)
+    }
+  }
+  return images
+}
+
 const downloadSelectedPdf = async () => {
   if (!selectedMessages.value.length) return
   isGeneratingPdf.value = true
   try {
-    const { generateChatPdf } = await import('~/utils/chatPdfExport')
-    const blob = await generateChatPdf(selectedMessages.value, chatContextLabel.value, chatChartInstances)
+    const [{ generateChatPdf }, chartImages] = await Promise.all([
+      import('~/utils/chatPdfExport'),
+      captureChartImages()
+    ])
+    const blob = await generateChatPdf(selectedMessages.value, chatContextLabel.value, chartImages)
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
@@ -167,8 +200,11 @@ const sendSelectedEmail = async () => {
   if (!emailTo.value || isSendingEmail.value) return
   isSendingEmail.value = true
   try {
-    const { generateChatPdf } = await import('~/utils/chatPdfExport')
-    const blob = await generateChatPdf(selectedMessages.value, chatContextLabel.value, chatChartInstances)
+    const [{ generateChatPdf }, chartImages] = await Promise.all([
+      import('~/utils/chatPdfExport'),
+      captureChartImages()
+    ])
+    const blob = await generateChatPdf(selectedMessages.value, chatContextLabel.value, chartImages)
     const base64 = await new Promise<string>((res, rej) => {
       const reader = new FileReader()
       reader.onload = () => res((reader.result as string).split(',')[1])
