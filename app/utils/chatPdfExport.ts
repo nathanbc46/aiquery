@@ -1,7 +1,9 @@
 // PDF generation utility สำหรับ export chat messages
 // ต้องวางไฟล์ THSarabunNew.ttf ไว้ที่ public/fonts/THSarabunNew.ttf
 import { jsPDF } from 'jspdf'
-import 'jspdf-autotable'
+import { applyPlugin } from 'jspdf-autotable'
+
+applyPlugin(jsPDF)
 
 type Segment =
   | { type: 'text'; content: string }
