@@ -2,6 +2,7 @@
 // ต้องวางไฟล์ THSarabunNew.ttf ไว้ที่ public/fonts/THSarabunNew.ttf
 import { jsPDF } from 'jspdf'
 import { applyPlugin } from 'jspdf-autotable'
+import { svg2pdf } from 'svg2pdf.js'
 
 applyPlugin(jsPDF)
 
@@ -179,11 +180,11 @@ function renderUserBubble(doc: any, content: string, y: number, useThaiFont: boo
   return y + boxH + 5
 }
 
-// วาด AI message (รับ segments พร้อม chart instances)
+// วาด AI message (รับ segments พร้อม SVG elements)
 async function renderAiBubble(
   doc: any,
   segments: Segment[],
-  chartImages: Map<string, string>,
+  chartSvgs: Map<string, SVGSVGElement>,
   y: number,
   useThaiFont: boolean
 ): Promise<number> {
@@ -234,12 +235,17 @@ async function renderAiBubble(
       y = (doc as any).lastAutoTable.finalY + 5
 
     } else if (seg.type === 'chart') {
-      const imgURI = chartImages.get(seg.id)
-      if (imgURI) {
-        const imgH = 70
-        y = ensureSpace(doc, y, imgH + 4)
-        doc.addImage(imgURI, 'PNG', LEFT + 2, y, RIGHT - LEFT - 4, imgH)
-        y += imgH + 5
+      const svgEl = chartSvgs.get(seg.id)
+      if (svgEl) {
+        const chartW = RIGHT - LEFT - 4
+        const chartH = 70
+        y = ensureSpace(doc, y, chartH + 4)
+        try {
+          await svg2pdf(svgEl, doc, { x: LEFT + 2, y, width: chartW, height: chartH })
+        } catch (e) {
+          console.warn('svg2pdf failed:', seg.id, e)
+        }
+        y += chartH + 5
       }
     }
   }
@@ -262,7 +268,7 @@ function addPageNumbers(doc: any) {
 export async function generateChatPdf(
   selectedMessages: Array<{ role: string; content: string }>,
   chatContextLabel: string,
-  chartImages: Map<string, string>
+  chartSvgs: Map<string, SVGSVGElement>
 ): Promise<Blob> {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
 
@@ -278,7 +284,7 @@ export async function generateChatPdf(
       y = renderUserBubble(doc, msg.content, y, useThaiFont)
     } else {
       const segs = parseMessageSegments(msg.content)
-      y = await renderAiBubble(doc, segs, chartImages, y, useThaiFont)
+      y = await renderAiBubble(doc, segs, chartSvgs, y, useThaiFont)
     }
   }
 
