@@ -1,4 +1,5 @@
 import nodemailer from 'nodemailer';
+import type Mail from 'nodemailer/lib/mailer';
 import { useDb } from './db';
 import { aiMailSettings } from './schema';
 import { eq } from 'drizzle-orm';
@@ -6,7 +7,14 @@ import { eq } from 'drizzle-orm';
 /**
  * ฟังก์ชันสำหรับส่งอีเมลโดยใช้การตั้งค่าจากฐานข้อมูล
  */
-export async function sendEmail({ to, subject, html }: { to: string, subject: string, html: string }) {
+export async function sendEmail({
+  to, subject, html, attachments
+}: {
+  to: string
+  subject: string
+  html: string
+  attachments?: Mail.Attachment[]
+}) {
   const db = await useDb();
   
   // 1. ดึงการตั้งค่าเมลจาก DB
@@ -35,7 +43,8 @@ export async function sendEmail({ to, subject, html }: { to: string, subject: st
       from: `"${config.fromName || 'AI Query System'}" <${config.fromEmail || config.user}>`,
       to,
       subject,
-      html
+      html,
+      attachments
     });
 
     console.log('Email sent: %s', info.messageId);

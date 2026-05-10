@@ -36,7 +36,10 @@ import {
   MessageSquare,
   ChevronDown,
   Volume2,
-  VolumeX
+  VolumeX,
+  Share2,
+  Square,
+  SquareCheck
 } from 'lucide-vue-next'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
@@ -110,6 +113,86 @@ const isChatInitializing = ref(false)
 const chatSessionId = ref<string | null>(null)
 const chatScrollRef = ref<HTMLElement | null>(null)
 const chatChartRegistry = new Map<string, any>()
+const chatChartInstances = new Map<string, any>()
+
+// Share / PDF export state
+const isChatSelectMode = ref(false)
+const selectedMsgIdxs = ref<Set<number>>(new Set())
+const isShareEmailModalOpen = ref(false)
+const isGeneratingPdf = ref(false)
+const isSendingEmail = ref(false)
+const emailTo = ref('')
+const emailSubject = ref('')
+const emailMessage = ref('')
+
+const selectedMessages = computed(() =>
+  chatMessages.value.filter((_, i) => selectedMsgIdxs.value.has(i))
+)
+
+const toggleSelectMsg = (idx: number) => {
+  const s = new Set(selectedMsgIdxs.value)
+  s.has(idx) ? s.delete(idx) : s.add(idx)
+  selectedMsgIdxs.value = s
+}
+
+const downloadSelectedPdf = async () => {
+  if (!selectedMessages.value.length) return
+  isGeneratingPdf.value = true
+  try {
+    const { generateChatPdf } = await import('~/utils/chatPdfExport')
+    const blob = await generateChatPdf(selectedMessages.value, chatContextLabel.value, chatChartInstances)
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `chat-report-${Date.now()}.pdf`
+    a.click()
+    URL.revokeObjectURL(url)
+  } catch (e: any) {
+    toast.error('สร้าง PDF ล้มเหลว', e?.message || 'ไม่สามารถสร้าง PDF ได้')
+  } finally {
+    isGeneratingPdf.value = false
+  }
+}
+
+const openShareEmailModal = () => {
+  emailSubject.value = `รายงานการสนทนา AI - ${new Date().toLocaleDateString('th-TH')}`
+  emailTo.value = ''
+  emailMessage.value = ''
+  isShareEmailModalOpen.value = true
+}
+
+const sendSelectedEmail = async () => {
+  if (!emailTo.value || isSendingEmail.value) return
+  isSendingEmail.value = true
+  try {
+    const { generateChatPdf } = await import('~/utils/chatPdfExport')
+    const blob = await generateChatPdf(selectedMessages.value, chatContextLabel.value, chatChartInstances)
+    const base64 = await new Promise<string>((res, rej) => {
+      const reader = new FileReader()
+      reader.onload = () => res((reader.result as string).split(',')[1])
+      reader.onerror = rej
+      reader.readAsDataURL(blob)
+    })
+    await $fetch('/api/ai-query/chat-export-email', {
+      method: 'POST',
+      body: {
+        to: emailTo.value,
+        subject: emailSubject.value,
+        message: emailMessage.value,
+        pdfBase64: base64,
+        filename: `chat-report-${Date.now()}.pdf`
+      }
+    })
+    toast.success('ส่งอีเมลสำเร็จ', `ส่งรายงานไปยัง ${emailTo.value} เรียบร้อยแล้ว`)
+    isShareEmailModalOpen.value = false
+    isChatSelectMode.value = false
+    selectedMsgIdxs.value = new Set()
+  } catch (e: any) {
+    toast.error('ส่งอีเมลล้มเหลว', e?.data?.message || 'ไม่สามารถส่งได้')
+  } finally {
+    isSendingEmail.value = false
+  }
+}
 
 // Text-to-Speech
 const speakingIdx = ref<number | null>(null)
@@ -251,7 +334,9 @@ const renderChatApexCharts = async () => {
     if (isPie) { options.labels = Array.isArray(config.labels) ? config.labels : [] }
     else { options.xaxis = { categories: Array.isArray(config.categories) ? config.categories : [] } }
     const chart = new ApexCharts(el as HTMLElement, options)
-    chart.render().catch((err: any) => console.error('Chat chart render error', id, err))
+    chart.render()
+      .then(() => { chatChartInstances.set(id, chart) })
+      .catch((err: any) => console.error('Chat chart render error', id, err))
   })
 }
 
@@ -311,6 +396,10 @@ const resetChat = () => {
   chatMessages.value = []
   chatInput.value = ''
   showChatSuggest.value = false
+  isChatSelectMode.value = false
+  selectedMsgIdxs.value = new Set()
+  chatChartInstances.forEach(inst => { try { inst.destroy() } catch {} })
+  chatChartInstances.clear()
   chatChartRegistry.clear()
   if (chatSessionId.value) {
     $fetch('/api/ai-query/chat-direct-session', {
@@ -2209,6 +2298,18 @@ const highlightSql = (sqlStr: string) => {
                   </div>
                 </div>
                 <div class="flex items-center gap-1">
+                  <!-- ปุ่มเลือกข้อความเพื่อแชร์ -->
+                  <button
+                    v-if="chatMessages.length > 0"
+                    @click="isChatSelectMode = !isChatSelectMode; selectedMsgIdxs = new Set()"
+                    class="p-2 rounded-xl transition-colors"
+                    :class="isChatSelectMode
+                      ? 'text-violet-600 dark:text-violet-400 bg-violet-50 dark:bg-violet-900/30'
+                      : 'text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'"
+                    title="เลือกข้อความเพื่อแชร์"
+                  >
+                    <Share2 class="w-5 h-5" />
+                  </button>
                   <button
                     @click="isChatFullscreen = !isChatFullscreen"
                     class="p-2 rounded-xl text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
@@ -2234,6 +2335,37 @@ const highlightSql = (sqlStr: string) => {
               >
                 <ChevronDown class="w-4 h-4" />
               </button>
+              <!-- Action bar เมื่อเลือกข้อความ -->
+              <Transition name="slide-down">
+                <div
+                  v-if="isChatSelectMode && selectedMsgIdxs.size > 0"
+                  class="mx-3 mt-2 flex items-center gap-2 px-4 py-2.5 bg-violet-600 text-white rounded-2xl shadow-lg shrink-0"
+                >
+                  <span class="text-sm font-bold flex-1">เลือกแล้ว {{ selectedMsgIdxs.size }} รายการ</span>
+                  <button
+                    @click="downloadSelectedPdf"
+                    :disabled="isGeneratingPdf"
+                    class="flex items-center gap-1.5 px-3 py-1.5 bg-white/20 hover:bg-white/30 disabled:opacity-50 rounded-xl text-xs font-bold transition-all"
+                  >
+                    <Loader2 v-if="isGeneratingPdf" class="w-3.5 h-3.5 animate-spin" />
+                    <Download v-else class="w-3.5 h-3.5" />
+                    PDF
+                  </button>
+                  <button
+                    @click="openShareEmailModal"
+                    class="flex items-center gap-1.5 px-3 py-1.5 bg-white/20 hover:bg-white/30 rounded-xl text-xs font-bold transition-all"
+                  >
+                    <Mail class="w-3.5 h-3.5" />
+                    อีเมล
+                  </button>
+                  <button
+                    @click="isChatSelectMode = false; selectedMsgIdxs = new Set()"
+                    class="p-1.5 hover:bg-white/20 rounded-lg transition-all"
+                  >
+                    <X class="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </Transition>
               <!-- Messages scroll area -->
               <div ref="chatScrollRef" class="h-full overflow-y-auto p-6 space-y-4 custom-scrollbar">
 
@@ -2268,22 +2400,50 @@ const highlightSql = (sqlStr: string) => {
                 <!-- Chat bubbles -->
                 <template v-for="(msg, idx) in chatMessages" :key="idx">
                   <!-- User bubble -->
-                  <div v-if="msg.role === 'user'" class="chat-message flex justify-end">
-                    <div class="max-w-[80%] px-5 py-3 bg-violet-600 text-white rounded-2xl rounded-tr-sm text-sm font-medium leading-relaxed shadow-md shadow-violet-500/20">
+                  <div v-if="msg.role === 'user'" class="chat-message flex justify-end items-start gap-2">
+                    <Transition name="fade-fast">
+                      <button v-if="isChatSelectMode" @click="toggleSelectMsg(idx)" class="shrink-0 mt-2 transition-colors">
+                        <SquareCheck v-if="selectedMsgIdxs.has(idx)" class="w-5 h-5 text-violet-500" />
+                        <Square v-else class="w-5 h-5 text-slate-300 dark:text-slate-600" />
+                      </button>
+                    </Transition>
+                    <div
+                      class="max-w-[80%] px-5 py-3 text-white rounded-2xl rounded-tr-sm text-sm font-medium leading-relaxed shadow-md transition-all"
+                      :class="[
+                        isChatSelectMode ? 'cursor-pointer' : '',
+                        selectedMsgIdxs.has(idx) && isChatSelectMode
+                          ? 'bg-violet-400 ring-2 ring-violet-300 dark:ring-violet-500'
+                          : 'bg-violet-600 shadow-violet-500/20'
+                      ]"
+                      @click="isChatSelectMode ? toggleSelectMsg(idx) : undefined"
+                    >
                       {{ msg.content }}
                     </div>
                   </div>
                   <!-- AI bubble -->
-                  <div v-else class="chat-message flex justify-start gap-3 group/msg">
+                  <div v-else class="chat-message flex justify-start items-start gap-2 group/msg">
+                    <Transition name="fade-fast">
+                      <button v-if="isChatSelectMode" @click="toggleSelectMsg(idx)" class="shrink-0 mt-1 transition-colors">
+                        <SquareCheck v-if="selectedMsgIdxs.has(idx)" class="w-5 h-5 text-violet-500" />
+                        <Square v-else class="w-5 h-5 text-slate-300 dark:text-slate-600" />
+                      </button>
+                    </Transition>
                     <div class="w-8 h-8 rounded-xl bg-violet-100 dark:bg-violet-900/40 flex items-center justify-center text-violet-600 dark:text-violet-400 shrink-0 mt-1">
                       <BrainCircuit class="w-4 h-4" />
                     </div>
                     <div class="min-w-0 flex-1 flex flex-col gap-1">
                       <div
-                        class="px-5 py-3 bg-slate-100 dark:bg-slate-800 rounded-2xl rounded-tl-sm text-sm text-slate-800 dark:text-slate-200 leading-relaxed shadow-sm"
+                        class="px-5 py-3 rounded-2xl rounded-tl-sm text-sm text-slate-800 dark:text-slate-200 leading-relaxed shadow-sm transition-all"
+                        :class="[
+                          isChatSelectMode ? 'cursor-pointer' : '',
+                          selectedMsgIdxs.has(idx) && isChatSelectMode
+                            ? 'bg-violet-50 dark:bg-violet-900/30 ring-2 ring-violet-300 dark:ring-violet-700'
+                            : 'bg-slate-100 dark:bg-slate-800'
+                        ]"
                         v-html="renderChatMarkdown(msg.content)"
+                        @click="isChatSelectMode ? toggleSelectMsg(idx) : undefined"
                       ></div>
-                      <div class="flex items-center px-1">
+                      <div v-if="!isChatSelectMode" class="flex items-center px-1">
                         <button
                           @click="speakMessage(msg.content, idx)"
                           class="flex items-center gap-1.5 px-2 py-1 rounded-lg text-[10px] font-bold transition-all opacity-0 group-hover/msg:opacity-100 focus:opacity-100"
@@ -2363,6 +2523,82 @@ const highlightSql = (sqlStr: string) => {
             </div>
           </div>
         </transition>
+      </Teleport>
+
+      <!-- Email form modal สำหรับส่ง PDF ที่เลือก -->
+      <Teleport to="body">
+        <Transition name="modal">
+          <div
+            v-if="isShareEmailModalOpen"
+            class="fixed inset-0 z-[170] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm"
+            @click.self="isShareEmailModalOpen = false"
+          >
+            <div class="bg-white dark:bg-slate-900 w-full max-w-md rounded-[2rem] shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden animate-in zoom-in-95 duration-200" @click.stop>
+              <!-- Header -->
+              <div class="px-6 py-5 bg-violet-50 dark:bg-violet-900/20 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                  <div class="w-9 h-9 rounded-xl bg-violet-100 dark:bg-violet-900/40 flex items-center justify-center text-violet-600 dark:text-violet-400">
+                    <Mail class="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 class="text-sm font-black text-slate-900 dark:text-white">ส่งรายงานทางอีเมล</h3>
+                    <p class="text-[10px] text-slate-500 dark:text-slate-400">ส่ง {{ selectedMsgIdxs.size }} ข้อความที่เลือกเป็น PDF</p>
+                  </div>
+                </div>
+                <button @click="isShareEmailModalOpen = false" class="p-2 rounded-xl text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
+                  <X class="w-5 h-5" />
+                </button>
+              </div>
+              <!-- Form -->
+              <div class="p-6 space-y-4">
+                <div class="space-y-1.5">
+                  <label class="text-xs font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest">อีเมลผู้รับ *</label>
+                  <input
+                    v-model="emailTo"
+                    type="email"
+                    placeholder="someone@example.com"
+                    class="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-500/30 focus:border-violet-500 transition-all"
+                  />
+                </div>
+                <div class="space-y-1.5">
+                  <label class="text-xs font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest">หัวข้ออีเมล</label>
+                  <input
+                    v-model="emailSubject"
+                    type="text"
+                    placeholder="รายงานการสนทนา AI"
+                    class="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-500/30 focus:border-violet-500 transition-all"
+                  />
+                </div>
+                <div class="space-y-1.5">
+                  <label class="text-xs font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest">ข้อความเพิ่มเติม (ไม่บังคับ)</label>
+                  <textarea
+                    v-model="emailMessage"
+                    rows="3"
+                    placeholder="ข้อความที่ต้องการส่งพร้อมกับรายงาน..."
+                    class="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-500/30 focus:border-violet-500 transition-all resize-none"
+                  ></textarea>
+                </div>
+                <div class="flex gap-3 pt-2">
+                  <button
+                    @click="isShareEmailModalOpen = false"
+                    class="flex-1 py-3 text-sm font-black text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-all uppercase tracking-widest"
+                  >
+                    ยกเลิก
+                  </button>
+                  <button
+                    @click="sendSelectedEmail"
+                    :disabled="!emailTo.trim() || isSendingEmail"
+                    class="flex-1 py-3 bg-violet-600 hover:bg-violet-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-black rounded-2xl shadow-lg shadow-violet-500/20 transition-all active:scale-95 flex items-center justify-center gap-2"
+                  >
+                    <Loader2 v-if="isSendingEmail" class="w-4 h-4 animate-spin" />
+                    <Mail v-else class="w-4 h-4" />
+                    {{ isSendingEmail ? 'กำลังส่ง...' : 'ส่งอีเมล' }}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </Transition>
       </Teleport>
     </ClientOnly>
 
@@ -2591,6 +2827,20 @@ const highlightSql = (sqlStr: string) => {
 .suggest-enter-from, .suggest-leave-to {
   opacity: 0;
   transform: translateY(6px);
+  max-height: 0;
+}
+
+.fade-fast-enter-active, .fade-fast-leave-active { transition: opacity 0.15s ease; }
+.fade-fast-enter-from, .fade-fast-leave-to { opacity: 0; }
+
+.slide-down-enter-active, .slide-down-leave-active {
+  transition: opacity 0.2s ease, transform 0.2s ease, max-height 0.2s ease;
+  overflow: hidden;
+  max-height: 80px;
+}
+.slide-down-enter-from, .slide-down-leave-to {
+  opacity: 0;
+  transform: translateY(-8px);
   max-height: 0;
 }
 
