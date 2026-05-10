@@ -39,11 +39,13 @@ import {
   VolumeX,
   Share2,
   Square,
-  SquareCheck
+  SquareCheck,
+  MousePointerClick
 } from 'lucide-vue-next'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import ApexCharts from 'apexcharts'
+import 'apexcharts/features/exports'
 
 
 const prompt = ref('')
@@ -2335,6 +2337,22 @@ const highlightSql = (sqlStr: string) => {
               >
                 <ChevronDown class="w-4 h-4" />
               </button>
+              <!-- Hint เมื่อเข้า selection mode แต่ยังไม่เลือก -->
+              <Transition name="slide-down">
+                <div
+                  v-if="isChatSelectMode && selectedMsgIdxs.size === 0"
+                  class="mx-3 mt-2 flex items-center gap-2 px-4 py-2.5 bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 rounded-2xl shrink-0"
+                >
+                  <MousePointerClick class="w-4 h-4 shrink-0 text-violet-500" />
+                  <span class="text-xs">แตะที่ข้อความที่ต้องการเพื่อเลือก แล้วดาวน์โหลดเป็น PDF หรือส่งอีเมล</span>
+                  <button
+                    @click="isChatSelectMode = false; selectedMsgIdxs = new Set()"
+                    class="ml-auto p-1 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg transition-all shrink-0"
+                  >
+                    <X class="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </Transition>
               <!-- Action bar เมื่อเลือกข้อความ -->
               <Transition name="slide-down">
                 <div

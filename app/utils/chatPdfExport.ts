@@ -238,8 +238,8 @@ async function renderAiBubble(
           y = ensureSpace(doc, y, imgH + 4)
           doc.addImage(imgURI, 'PNG', LEFT + 2, y, RIGHT - LEFT - 4, imgH)
           y += imgH + 5
-        } catch {
-          // ถ้า export กราฟไม่ได้ ข้ามไป
+        } catch (e) {
+          console.warn('Chart export failed:', seg.id, e)
         }
       }
     }
