@@ -5,16 +5,22 @@ import { getAuthSession } from '../../utils/auth';
 import { DEFAULT_MAX_RESULTS_LIMIT } from '../../utils/constants';
 import { randomUUID } from 'crypto';
 
-const buildCsv = (rows: any[]): string => {
+/**
+ * แปลง rows เป็น JSON Lines (NDJSON) — แต่ละแถวเป็น JSON object 1 บรรทัด
+ * ปลอดภัยกว่า CSV เพราะไม่มีปัญหาเรื่อง delimiter (comma, pipe, newline, quote)
+ */
+const buildNdjson = (rows: any[]): string => {
   if (rows.length === 0) return '';
-  const columns = Object.keys(rows[0]);
-  const escape = (val: any) => {
-    const str = String(val ?? '').replace(/"/g, '""');
-    return str.includes(',') || str.includes('\n') || str.includes('"') ? `"${str}"` : str;
-  };
-  const header = columns.join(',');
-  const body = rows.map(row => columns.map(col => escape(row[col])).join(','));
-  return [header, ...body].join('\n');
+  // Sanitize ค่าแต่ละ field ให้เป็น string ที่ปลอดภัย
+  return rows
+    .map(row => {
+      const sanitized: Record<string, string> = {};
+      for (const [key, val] of Object.entries(row)) {
+        sanitized[key] = val === null || val === undefined ? '' : String(val);
+      }
+      return JSON.stringify(sanitized);
+    })
+    .join('\n');
 };
 
 export default defineEventHandler(async (event) => {
@@ -57,10 +63,11 @@ export default defineEventHandler(async (event) => {
       rows = Array.isArray(results[0]) ? results[0] : (results as any[]);
     }
 
-    const csvContent = buildCsv(rows);
+    // บันทึกเป็น NDJSON แทน CSV เพื่อหลีกเลี่ยงปัญหาการแบ่งคอลัมน์ผิดพลาด
+    const ndjsonContent = buildNdjson(rows);
     const sessionId = randomUUID();
     const storage = useStorage('snapshots');
-    await storage.setItem(`chat-direct-${sessionId}.csv`, csvContent);
+    await storage.setItem(`chat-direct-${sessionId}.ndjson`, ndjsonContent);
 
     return { success: true, sessionId, rowCount: rows.length };
 

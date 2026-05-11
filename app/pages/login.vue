@@ -41,8 +41,8 @@ const handleLogin = async () => {
       }
     })
 
-    // Success - Redirect to home or history
-    navigateTo('/history')
+    // Success - Redirect to home (หน้าดึงข้อมูลด้วยภาษาธรรมชาติ)
+    navigateTo('/')
   } catch (e: any) {
     errorMsg.value = e.data?.message || 'การเข้าสู่ระบบล้มเหลว'
   } finally {

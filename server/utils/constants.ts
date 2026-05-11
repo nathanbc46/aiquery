@@ -429,6 +429,15 @@ CRITICAL RULES FOR SQL GENERATION:
 
 17. JOIN ALIAS VALIDATION: Double check join conditions. For example, when joining vtiger_assets (a) and vtiger_products (p), use "a.product = p.productid". Never assume vtiger_products has a column named 'product'.
 
+18. MYSQL DATE MATH / INTERVAL SYNTAX:
+    NEVER use complex math or function calls directly inside an INTERVAL expression. This will cause MySQL syntax errors.
+    WRONG: DATE_SUB(CURDATE(), INTERVAL 1 YEAR - DAYOFMONTH(CURDATE()) + 1 DAY)
+    CORRECT (start of last year): DATE_FORMAT(CURDATE() - INTERVAL 1 YEAR, '%Y-01-01')
+    CORRECT (start of this year): DATE_FORMAT(CURDATE(), '%Y-01-01')
+    CORRECT (start of current month): DATE_FORMAT(CURDATE(), '%Y-%m-01')
+    CORRECT (exactly 1 year ago): DATE_SUB(CURDATE(), INTERVAL 1 YEAR)
+    Always construct start/end dates using DATE_FORMAT or LAST_DAY functions rather than invalid INTERVAL math.
+
 ---
 OUTPUT FORMAT:
 Output your response as a pure JSON object with NO Markdown code blocks, no \`\`\`json, and no extra text outside the JSON.

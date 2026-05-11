@@ -55,7 +55,7 @@ function parseMessageSegments(content: string): Segment[] {
   chartRegex.lastIndex = 0
   while ((m = chartRegex.exec(content)) !== null) {
     try {
-      const json = m[1]
+      const json = m[1] || ''
       const id = `chat-chart-${chatHashStr(json)}`
       parts.push({ start: m.index, end: m.index + m[0].length, segment: { type: 'chart', id } })
     } catch { /* skip malformed */ }
@@ -107,12 +107,10 @@ function extractMarkdownTable(block: string): string[][] {
   return result
 }
 
-// ลบ markdown syntax ออก เหลือแต่ text
+// ลบ markdown syntax ออก เหลือแต่ text (แต่เก็บ ** และ * ไว้ทำตัวหนา)
 function stripMarkdown(text: string): string {
   return text
     .replace(/```[\s\S]*?```/gim, '')
-    .replace(/\*\*(.*?)\*\*/gim, '$1')
-    .replace(/\*(.*?)\*/gim, '$1')
     .replace(/^#{1,3}\s+/gim, '')
     .replace(/`(.*?)`/gim, '$1')
     .replace(/^\s*[-*]\s+/gim, '• ')
@@ -134,6 +132,68 @@ function ensureSpace(doc: any, y: number, needed: number): number {
   return y
 }
 
+// ฟังก์ชันจำลองตัวหนาและขึ้นบรรทัดใหม่
+function renderInlineMarkdown(doc: any, text: string, startX: number, startY: number, maxWidth: number, useThaiFont: boolean): number {
+  if (useThaiFont) doc.setFont('THSarabunNew', 'normal')
+  const lineHeight = 5.5
+  const lines = text.split('\n')
+  let currentY = startY
+
+  for (const line of lines) {
+    currentY = ensureSpace(doc, currentY, lineHeight)
+    
+    if (!line.trim()) {
+      currentY += lineHeight
+      continue
+    }
+
+    const tokens = []
+    const regex = /(\*\*.*?\*\*|\*.*?\*)/g
+    let lastIdx = 0
+    let match
+    while ((match = regex.exec(line)) !== null) {
+      if (match.index > lastIdx) {
+        tokens.push({ text: line.slice(lastIdx, match.index), isBold: false })
+      }
+      tokens.push({ text: match[0].replace(/\*/g, ''), isBold: true })
+      lastIdx = regex.lastIndex
+    }
+    if (lastIdx < line.length) {
+      tokens.push({ text: line.slice(lastIdx), isBold: false })
+    }
+
+    let currentX = startX
+    for (const token of tokens) {
+      const words = token.text.split(/(\s+)/)
+      for (const word of words) {
+        if (!word) continue
+        const isSpace = /^\s+$/.test(word)
+        
+        // ใช้สีเส้นขอบที่เข้มขึ้นตามตัวอักษร
+        doc.setDrawColor(70, 70, 70)
+        doc.setLineWidth(token.isBold ? 0.04 : 0) 
+        const renderMode = token.isBold ? 'fillThenStroke' : 'fill'
+        
+        const wordWidth = doc.getTextWidth(word)
+        
+        if (currentX + wordWidth > startX + maxWidth && !isSpace) {
+          currentX = startX
+          currentY += lineHeight
+          currentY = ensureSpace(doc, currentY, lineHeight)
+        }
+        
+        if (!isSpace || currentX > startX) {
+          doc.text(word, currentX, currentY, { renderingMode: renderMode })
+          currentX += wordWidth
+        }
+      }
+    }
+    currentY += lineHeight
+  }
+  
+  return currentY
+}
+
 // วาด header ของ PDF
 function drawPdfHeader(doc: any, contextLabel: string, msgCount: number) {
   // แถบสี
@@ -152,7 +212,7 @@ function drawPdfHeader(doc: any, contextLabel: string, msgCount: number) {
   const dateStr = new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' })
   doc.text(`วันที่: ${dateStr}  ·  จำนวนข้อความที่เลือก: ${msgCount}`, RIGHT, 20, { align: 'right' })
 
-  doc.setTextColor(30, 30, 30)
+  doc.setTextColor(10, 10, 10)
 }
 
 // วาด user message bubble
@@ -173,9 +233,10 @@ function renderUserBubble(doc: any, content: string, y: number, useThaiFont: boo
   doc.text('คุณ', RIGHT, y + 4, { align: 'right' })
   doc.setFontSize(9.5)
   doc.setTextColor(50, 30, 100)
+  doc.setTextColor(40, 20, 80)
   doc.text(lines, boxX + 4, y + 10)
 
-  doc.setTextColor(30, 30, 30)
+  doc.setTextColor(10, 10, 10)
   return y + boxH + 5
 }
 
@@ -195,18 +256,15 @@ async function renderAiBubble(
   doc.setTextColor(99, 102, 241)
   if (useThaiFont) doc.setFont('THSarabunNew', 'normal')
   doc.text('AI', LEFT + 4, y + 3.5)
-  doc.setTextColor(30, 30, 30)
+  doc.setTextColor(10, 10, 10)
   y += 6
 
   for (const seg of segments) {
     if (seg.type === 'text' && seg.content) {
       doc.setFontSize(10)
-      if (useThaiFont) doc.setFont('THSarabunNew', 'normal')
-      const lines: string[] = doc.splitTextToSize(seg.content, RIGHT - LEFT - 4)
-      const needed = lines.length * 5.5 + 3
-      y = ensureSpace(doc, y, needed)
-      doc.text(lines, LEFT + 4, y)
-      y += needed
+      doc.setTextColor(10, 10, 10)
+      y = renderInlineMarkdown(doc, seg.content, LEFT + 4, y, RIGHT - LEFT - 4, useThaiFont)
+      y += 1
 
     } else if (seg.type === 'table' && seg.rows.length > 1) {
       const head = [seg.rows[0]]

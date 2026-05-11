@@ -117,6 +117,32 @@ const chatScrollRef = ref<HTMLElement | null>(null)
 const chatChartRegistry = new Map<string, any>()
 const chatChartInstances = new Map<string, any>()
 
+// AI Model selector สำหรับ chat modal
+const CHAT_MODELS = [
+  {
+    id: 'gemini-2.5-pro',
+    label: 'Gemini 2.5 Pro',
+    badge: 'ฉลาดที่สุด',
+    badgeColor: 'text-violet-600 dark:text-violet-400 bg-violet-50 dark:bg-violet-900/30 border-violet-200 dark:border-violet-800'
+  },
+  {
+    id: 'gemini-2.5-flash',
+    label: 'Gemini 2.5 Flash',
+    badge: 'สมดุล · เร็ว',
+    badgeColor: 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30 border-blue-200 dark:border-blue-800'
+  },
+  {
+    id: 'gemini-3.1-flash-lite-preview',
+    label: 'Gemini 3.1 Flash Lite Preview',
+    badge: 'เบา · เร็วที่สุด',
+    badgeColor: 'text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/30 border-emerald-200 dark:border-emerald-800'
+  }
+] as const
+
+// ค่า default ใช้ '' ก่อน (หมายถึง ใช้ค่าจาก admin settings)
+const chatModel = ref<string>('')
+const isChatModelDropdownOpen = ref(false)
+
 // Share / PDF export state
 const isChatSelectMode = ref(false)
 const selectedMsgIdxs = ref<Set<number>>(new Set())
@@ -126,6 +152,7 @@ const isSendingEmail = ref(false)
 const emailTo = ref('')
 const emailSubject = ref('')
 const emailMessage = ref('')
+const emailError = ref<{ title: string; detail: string } | null>(null)
 
 const selectedMessages = computed(() =>
   chatMessages.value.filter((_, i) => selectedMsgIdxs.value.has(i))
@@ -181,18 +208,43 @@ const openShareEmailModal = () => {
   emailSubject.value = `รายงานการสนทนา AI - ${new Date().toLocaleDateString('th-TH')}`
   emailTo.value = ''
   emailMessage.value = ''
+  emailError.value = null
   isShareEmailModalOpen.value = true
 }
 
 const sendSelectedEmail = async () => {
   if (!emailTo.value || isSendingEmail.value) return
+  // ล้าง error เดิมก่อนเริ่มส่งใหม่
+  emailError.value = null
   isSendingEmail.value = true
   try {
-    const [{ generateChatPdf }, chartSvgs] = await Promise.all([
-      import('~/utils/chatPdfExport'),
-      collectChartSvgs()
-    ])
-    const blob = await generateChatPdf(selectedMessages.value, chatContextLabel.value, chartSvgs)
+    // ขั้นที่ 1: สร้าง PDF
+    let blob: Blob
+    try {
+      const [{ generateChatPdf }, chartSvgs] = await Promise.all([
+        import('~/utils/chatPdfExport'),
+        collectChartSvgs()
+      ])
+      blob = await generateChatPdf(selectedMessages.value, chatContextLabel.value, chartSvgs)
+    } catch (pdfErr: any) {
+      emailError.value = {
+        title: 'สร้างไฟล์ PDF ไม่สำเร็จ',
+        detail: pdfErr?.message || 'เกิดข้อผิดพลาดในการสร้างไฟล์ PDF กรุณาลองใหม่อีกครั้ง'
+      }
+      return
+    }
+
+    // ขั้นที่ 2: ตรวจขนาดไฟล์ก่อนส่ง (max 10 MB)
+    if (blob.size > 10 * 1024 * 1024) {
+      const sizeMb = (blob.size / 1024 / 1024).toFixed(1)
+      emailError.value = {
+        title: 'ไฟล์ PDF ใหญ่เกินไป',
+        detail: `ขนาดไฟล์ ${sizeMb} MB เกินขีดจำกัด 10 MB กรุณาลดจำนวนข้อความที่เลือก แล้วลองใหม่`
+      }
+      return
+    }
+
+    // ขั้นที่ 3: แปลง Blob เป็น base64
     const base64 = await new Promise<string>((res, rej) => {
       const reader = new FileReader()
       reader.onload = () => {
@@ -202,6 +254,8 @@ const sendSelectedEmail = async () => {
       reader.onerror = rej
       reader.readAsDataURL(blob)
     })
+
+    // ขั้นที่ 4: ส่งอีเมลผ่าน API
     await $fetch('/api/ai-query/chat-export-email', {
       method: 'POST',
       body: {
@@ -212,12 +266,36 @@ const sendSelectedEmail = async () => {
         filename: `chat-report-${Date.now()}.pdf`
       }
     })
+
     toast.success('ส่งอีเมลสำเร็จ', `ส่งรายงานไปยัง ${emailTo.value} เรียบร้อยแล้ว`)
     isShareEmailModalOpen.value = false
     isChatSelectMode.value = false
     selectedMsgIdxs.value = new Set()
   } catch (e: any) {
-    toast.error('ส่งอีเมลล้มเหลว', e?.data?.message || 'ไม่สามารถส่งได้')
+    // แปลง HTTP error ให้เป็นข้อความไทยที่เข้าใจได้
+    const statusCode: number = e?.status || e?.statusCode || 0
+    const serverMsg: string = e?.data?.message || e?.data?.statusMessage || e?.statusMessage || e?.message || ''
+    let title = 'ส่งอีเมลไม่สำเร็จ'
+    let detail = serverMsg || 'เกิดข้อผิดพลาดที่ไม่ทราบสาเหตุ'
+
+    if (statusCode === 400 || serverMsg.toLowerCase().includes('invalid email')) {
+      title = 'อีเมลผู้รับไม่ถูกต้อง'
+      detail = `"${emailTo.value}" ไม่ใช่รูปแบบอีเมลที่ถูกต้อง กรุณาตรวจสอบและลองใหม่`
+    } else if (statusCode === 413 || serverMsg.toLowerCase().includes('too large')) {
+      title = 'ไฟล์ PDF ใหญ่เกินไป'
+      detail = 'ขนาดไฟล์เกินขีดจำกัด 10 MB กรุณาลดจำนวนข้อความที่เลือก แล้วลองใหม่'
+    } else if (statusCode === 401) {
+      title = 'ไม่มีสิทธิ์เข้าใช้งาน'
+      detail = 'Session หมดอายุ กรุณา Refresh หน้าแล้วลองใหม่'
+    } else if (statusCode === 500 || serverMsg.toLowerCase().includes('mail') || serverMsg.toLowerCase().includes('smtp') || serverMsg.toLowerCase().includes('connect')) {
+      title = 'เซิร์ฟเวอร์อีเมลไม่ตอบสนอง'
+      detail = serverMsg || 'ไม่สามารถเชื่อมต่อกับเซิร์ฟเวอร์อีเมล กรุณาตรวจสอบการตั้งค่า SMTP หรือลองใหม่ภายหลัง'
+    } else if (!serverMsg && !navigator.onLine) {
+      title = 'ไม่มีการเชื่อมต่ออินเทอร์เน็ต'
+      detail = 'กรุณาตรวจสอบการเชื่อมต่อเครือข่ายแล้วลองใหม่'
+    }
+
+    emailError.value = { title, detail }
   } finally {
     isSendingEmail.value = false
   }
@@ -356,9 +434,22 @@ const renderChatApexCharts = async () => {
       title: { text: config.title || '', style: { fontSize: '13px', fontWeight: '700' } },
       series: series.length ? series : (isPie ? [1] : [{ name: 'ข้อมูล', data: [] }]),
       colors: ['#6366f1', '#22c55e', '#f59e0b', '#ec4899', '#14b8a6', '#f97316'],
-      dataLabels: { enabled: true },
+      dataLabels: { 
+        enabled: true,
+        formatter: (val: any) => typeof val === 'number' ? val.toLocaleString('th-TH', { maximumFractionDigits: 2 }) : val
+      },
       legend: { position: 'bottom' },
-      tooltip: { theme: isDark ? 'dark' : 'light' }
+      tooltip: { 
+        theme: isDark ? 'dark' : 'light',
+        y: {
+          formatter: (val: any) => typeof val === 'number' ? val.toLocaleString('th-TH', { maximumFractionDigits: 2 }) : val
+        }
+      },
+      yaxis: isPie ? undefined : {
+        labels: {
+          formatter: (val: any) => typeof val === 'number' ? val.toLocaleString('th-TH', { maximumFractionDigits: 2 }) : val
+        }
+      }
     }
     if (isPie) { options.labels = Array.isArray(config.labels) ? config.labels : [] }
     else { options.xaxis = { categories: Array.isArray(config.categories) ? config.categories : [] } }
@@ -466,7 +557,9 @@ const sendChatMessage = async () => {
         sessionId: chatSessionId.value,
         queryText: prompt.value,
         userMessage: msg,
-        messages: history
+        messages: history,
+        // ส่ง model ที่เลือกไว้ ('' = ใช้ default จาก admin settings)
+        modelOverride: chatModel.value || undefined
       }
     })
     chatMessages.value.push({ role: 'model', content: res.reply })
@@ -640,6 +733,13 @@ onMounted(() => {
 
 const { data: systemConfig } = useFetch<any>('/api/system-config')
 const suggestions = computed(() => systemConfig.value?.suggestions || [])
+
+// \u0e15\u0e31\u0e49\u0e07\u0e04\u0e48\u0e32 default chatModel \u0e08\u0e32\u0e01 admin settings \u0e40\u0e21\u0e37\u0e48\u0e2d\u0e42\u0e2b\u0e25\u0e14\u0e40\u0e2a\u0e23\u0e47\u0e08
+watch(systemConfig, (cfg) => {
+  if (cfg?.chatModel && !chatModel.value) {
+    chatModel.value = cfg.chatModel
+  }
+}, { immediate: true })
 
 const focusAndEnd = () => {
   setTimeout(() => {
@@ -1661,11 +1761,11 @@ const highlightSql = (sqlStr: string) => {
                   <span class="text-xs font-black uppercase tracking-widest">แชต AI</span>
                 </button>
 
-                <div v-if="isAdmin" class="flex items-stretch shadow-2xl shadow-emerald-500/30 rounded-[2rem] overflow-hidden">
+                <div v-if="isAdmin" class="grid grid-cols-2 shadow-2xl shadow-emerald-500/30 rounded-[2rem] overflow-hidden min-w-[240px]">
                   <button
                     @click="openCsvModal"
                     :disabled="isRequesting || generatedResult.previewCount === 0"
-                    class="flex-1 px-8 py-5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:grayscale text-white text-sm font-black transition-all flex items-center justify-center gap-3 active:scale-95 uppercase tracking-widest border-r border-emerald-500/50"
+                    class="py-5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:grayscale text-white text-sm font-black transition-all flex items-center justify-center gap-2 active:scale-95 uppercase tracking-widest border-r border-emerald-500/50"
                   >
                     <Download class="w-5 h-5" />
                     <span>CSV</span>
@@ -1673,12 +1773,12 @@ const highlightSql = (sqlStr: string) => {
                   <button
                     @click="openZohoModal"
                     :disabled="isRequesting || generatedResult.previewCount === 0"
-                    class="px-6 py-5 bg-emerald-600 hover:bg-emerald-700 text-white transition-all flex items-center justify-center active:scale-95 border-l border-emerald-700/30 group/zoho"
+                    class="py-5 bg-emerald-600 hover:bg-emerald-700 text-white transition-all flex items-center justify-center active:scale-95 border-l border-emerald-700/30 group/zoho"
                     title="Export to Zoho Sheet"
                   >
-                    <div class="flex flex-col items-center gap-0.5">
+                    <div class="flex items-center gap-2">
                       <LayoutGrid class="w-5 h-5" />
-                      <span class="text-[8px] font-black uppercase">Zoho</span>
+                      <span class="text-xs font-black uppercase">Zoho</span>
                     </div>
                   </button>
                 </div>
@@ -2314,8 +2414,9 @@ const highlightSql = (sqlStr: string) => {
               @click.stop
             >
               <!-- Header -->
-              <div class="px-7 py-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-violet-50/40 dark:bg-violet-900/10 shrink-0">
-                <div class="flex items-center gap-3">
+              <div class="px-6 py-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-violet-50/40 dark:bg-violet-900/10 shrink-0">
+                <!-- Icon + Title -->
+                <div class="flex items-center gap-3 shrink-0">
                   <div class="w-9 h-9 rounded-xl bg-violet-100 dark:bg-violet-900/40 flex items-center justify-center text-violet-600 dark:text-violet-400">
                     <BrainCircuit class="w-5 h-5" />
                   </div>
@@ -2520,49 +2621,117 @@ const highlightSql = (sqlStr: string) => {
               </div>
               </div>
 
-              <!-- Input area -->
-              <div class="border-t border-slate-100 dark:border-slate-800 shrink-0 bg-slate-50/50 dark:bg-slate-900/50">
+              <!-- Input area (Gemini Style) -->
+              <div class="border-t border-slate-100 dark:border-slate-800 shrink-0 bg-white dark:bg-slate-900 p-4">
                 <!-- Quick suggest panel -->
                 <transition name="suggest">
-                  <div v-if="showChatSuggest && chatMessages.length > 0" class="px-4 pt-3 pb-1 grid grid-cols-2 gap-2">
+                  <div v-if="showChatSuggest && chatMessages.length > 0" class="pb-3 grid grid-cols-2 gap-2">
                     <button
                       v-for="q in ['สรุปภาพรวมข้อมูลนี้', 'มีข้อมูลไหนผิดปกติไหม?', 'ช่วยสร้างตารางสรุปยอดให้ที', 'วิเคราะห์แนวโน้มสำคัญ']"
                       :key="q"
                       @click="sendQuickReply(q)"
                       :disabled="isChatLoading"
-                      class="px-3 py-2 bg-white dark:bg-slate-800 hover:bg-violet-50 dark:hover:bg-violet-900/30 border border-slate-200 dark:border-slate-700 hover:border-violet-300 dark:hover:border-violet-700 rounded-xl text-xs font-medium text-slate-600 dark:text-slate-300 hover:text-violet-700 dark:hover:text-violet-300 transition-all text-left leading-snug disabled:opacity-40"
+                      class="px-3 py-2 bg-slate-50 dark:bg-slate-800/50 hover:bg-violet-50 dark:hover:bg-violet-900/30 border border-slate-200 dark:border-slate-700/50 hover:border-violet-300 dark:hover:border-violet-700 rounded-xl text-xs font-medium text-slate-600 dark:text-slate-300 hover:text-violet-700 dark:hover:text-violet-300 transition-all text-left leading-snug disabled:opacity-40"
                     >
                       {{ q }}
                     </button>
                   </div>
                 </transition>
-                <div class="p-4 flex items-end gap-2">
-                  <button
-                    v-if="chatMessages.length > 0"
-                    @click="showChatSuggest = !showChatSuggest"
-                    class="p-3 rounded-2xl transition-all shrink-0 border"
-                    :class="showChatSuggest
-                      ? 'bg-violet-100 dark:bg-violet-900/40 text-violet-600 dark:text-violet-400 border-violet-200 dark:border-violet-800'
-                      : 'bg-white dark:bg-slate-800 text-slate-400 hover:text-violet-500 border-slate-200 dark:border-slate-700 hover:border-violet-300'"
-                    title="แนะนำคำถาม"
-                  >
-                    <Lightbulb class="w-5 h-5" />
-                  </button>
+                
+                <div class="bg-slate-50 dark:bg-slate-800/60 rounded-3xl border border-slate-200 dark:border-slate-700/60 focus-within:ring-2 focus-within:ring-violet-500/20 focus-within:border-violet-500 dark:focus-within:border-violet-400 transition-all flex flex-col relative shadow-sm">
                   <textarea
                     v-model="chatInput"
                     placeholder="ถามเกี่ยวกับข้อมูลชุดนี้... (Enter เพื่อส่ง, Shift+Enter ขึ้นบรรทัด)"
                     rows="2"
                     @keydown.enter.exact.prevent="sendChatMessage"
                     :disabled="isChatLoading"
-                    class="flex-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl px-4 py-3 text-sm text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-violet-500/30 focus:border-violet-500 dark:focus:border-violet-400 transition-all resize-none disabled:opacity-50"
+                    class="w-full bg-transparent border-none px-5 pt-4 pb-2 text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-0 resize-none disabled:opacity-50"
                   ></textarea>
-                  <button
-                    @click="sendChatMessage"
-                    :disabled="!chatInput.trim() || isChatLoading"
-                    class="p-3.5 bg-violet-600 hover:bg-violet-700 disabled:opacity-40 disabled:grayscale text-white rounded-2xl shadow-lg shadow-violet-500/20 transition-all active:scale-95 shrink-0"
-                  >
-                    <Send class="w-5 h-5" />
-                  </button>
+
+                  <!-- Bottom Toolbar -->
+                  <div class="flex items-center justify-between px-3 pb-3">
+                    <div class="flex items-center gap-2">
+                      <button
+                        v-if="chatMessages.length > 0"
+                        @click="showChatSuggest = !showChatSuggest"
+                        class="p-2 rounded-full transition-all text-slate-500 hover:text-violet-600 hover:bg-violet-50 dark:hover:bg-violet-900/30 dark:hover:text-violet-400"
+                        :class="showChatSuggest ? 'bg-violet-50 dark:bg-violet-900/30 text-violet-600 dark:text-violet-400' : ''"
+                        title="แนะนำคำถาม"
+                      >
+                        <Lightbulb class="w-5 h-5" />
+                      </button>
+                    </div>
+
+                    <div class="flex items-center gap-1.5 pr-1">
+                      <!-- Model Selector Dropdown in input area -->
+                      <div class="relative" @click.stop>
+                        <button
+                          @click="isChatModelDropdownOpen = !isChatModelDropdownOpen"
+                          class="flex items-center gap-1 px-3 py-2 rounded-full text-xs font-bold transition-all hover:bg-slate-200/60 dark:hover:bg-slate-700/60"
+                          :class="isChatModelDropdownOpen
+                            ? 'bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200'
+                            : 'bg-transparent text-slate-500 dark:text-slate-400'"
+                          title="เลือก AI Model"
+                        >
+                          <span class="truncate max-w-[150px]">
+                            {{ CHAT_MODELS.find(m => m.id === chatModel)?.label || chatModel }}
+                          </span>
+                          <ChevronDown class="w-3.5 h-3.5 shrink-0 transition-transform" :class="isChatModelDropdownOpen ? 'rotate-180' : ''" />
+                        </button>
+
+                        <!-- Dropdown list -->
+                        <Transition
+                          enter-active-class="transition-all duration-150 ease-out"
+                          enter-from-class="opacity-0 translate-y-1 scale-95"
+                          enter-to-class="opacity-100 translate-y-0 scale-100"
+                          leave-active-class="transition-all duration-100 ease-in"
+                          leave-from-class="opacity-100 translate-y-0 scale-100"
+                          leave-to-class="opacity-0 translate-y-1 scale-95"
+                        >
+                          <div
+                            v-if="isChatModelDropdownOpen"
+                            class="absolute bottom-full mb-2 right-0 w-60 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-3xl shadow-xl shadow-slate-200/60 dark:shadow-slate-900/60 z-50 overflow-hidden py-2"
+                            @click.stop
+                          >
+                            <div class="px-4 py-2 text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest border-b border-slate-100 dark:border-slate-800 mb-1">
+                              เลือก AI Model
+                            </div>
+                            <button
+                              v-for="m in CHAT_MODELS"
+                              :key="m.id"
+                              @click="chatModel = m.id; isChatModelDropdownOpen = false"
+                              class="w-full flex items-center justify-between px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors text-left"
+                              :class="chatModel === m.id ? 'bg-violet-50 dark:bg-violet-900/20' : ''"
+                            >
+                              <div>
+                                <p class="text-sm font-bold text-slate-800 dark:text-slate-200">{{ m.label }}</p>
+                              </div>
+                              <div class="flex items-center gap-1.5">
+                                <span class="inline-flex items-center px-1.5 py-0.5 rounded-md text-[9px] font-black border" :class="m.badgeColor">
+                                  {{ m.badge }}
+                                </span>
+                                <div v-if="chatModel === m.id" class="w-4 h-4 rounded-full bg-violet-600 flex items-center justify-center">
+                                  <svg class="w-2.5 h-2.5 text-white" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+                                  </svg>
+                                </div>
+                              </div>
+                            </button>
+                          </div>
+                        </Transition>
+                        <!-- Click outside to close -->
+                        <div v-if="isChatModelDropdownOpen" class="fixed inset-0 z-40" @click="isChatModelDropdownOpen = false"></div>
+                      </div>
+
+                      <button
+                        @click="sendChatMessage"
+                        :disabled="!chatInput.trim() || isChatLoading"
+                        class="p-2.5 bg-violet-600 hover:bg-violet-700 disabled:opacity-40 disabled:grayscale text-white rounded-full shadow-md shadow-violet-500/20 transition-all active:scale-95 shrink-0"
+                      >
+                        <Send class="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -2602,7 +2771,11 @@ const highlightSql = (sqlStr: string) => {
                     v-model="emailTo"
                     type="email"
                     placeholder="someone@example.com"
-                    class="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-500/30 focus:border-violet-500 transition-all"
+                    @input="emailError = null"
+                    :class="[
+                      'w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border rounded-2xl text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 transition-all',
+                      emailError ? 'border-rose-400 dark:border-rose-500 focus:ring-rose-500/30 focus:border-rose-500' : 'border-slate-200 dark:border-slate-700 focus:ring-violet-500/30 focus:border-violet-500'
+                    ]"
                   />
                 </div>
                 <div class="space-y-1.5">
@@ -2623,6 +2796,33 @@ const highlightSql = (sqlStr: string) => {
                     class="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-500/30 focus:border-violet-500 transition-all resize-none"
                   ></textarea>
                 </div>
+
+                <!-- Error box: แสดงเมื่อส่งไม่สำเร็จ -->
+                <Transition
+                  enter-active-class="transition-all duration-300 ease-out"
+                  enter-from-class="opacity-0 -translate-y-1 scale-95"
+                  enter-to-class="opacity-100 translate-y-0 scale-100"
+                  leave-active-class="transition-all duration-200 ease-in"
+                  leave-from-class="opacity-100 translate-y-0 scale-100"
+                  leave-to-class="opacity-0 -translate-y-1 scale-95"
+                >
+                  <div v-if="emailError" class="flex items-start gap-3 px-4 py-3.5 bg-rose-50 dark:bg-rose-500/10 border border-rose-200 dark:border-rose-500/30 rounded-2xl">
+                    <div class="shrink-0 w-7 h-7 rounded-xl bg-rose-100 dark:bg-rose-500/20 flex items-center justify-center text-rose-600 dark:text-rose-400 mt-0.5">
+                      <AlertCircle class="w-4 h-4" />
+                    </div>
+                    <div class="flex-1 min-w-0">
+                      <p class="text-sm font-black text-rose-700 dark:text-rose-400 leading-tight">{{ emailError.title }}</p>
+                      <p class="text-xs text-rose-600/80 dark:text-rose-400/70 mt-1 leading-relaxed">{{ emailError.detail }}</p>
+                    </div>
+                    <button
+                      @click="emailError = null"
+                      class="shrink-0 p-1 rounded-lg hover:bg-rose-100 dark:hover:bg-rose-500/20 text-rose-400 dark:text-rose-500 transition-colors"
+                    >
+                      <X class="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </Transition>
+
                 <div class="flex gap-3 pt-2">
                   <button
                     @click="isShareEmailModalOpen = false"

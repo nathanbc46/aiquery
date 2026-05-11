@@ -15,7 +15,10 @@ export default defineEventHandler(async (event) => {
   }
 
   const body = await readBody(event);
-  const { sessionId, queryText, userMessage, messages } = body;
+  const { sessionId, queryText, userMessage, messages, modelOverride } = body;
+
+  // Whitelist model ที่อนุญาต (ป้องกัน model injection)
+  const ALLOWED_MODELS = ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-3.1-flash-lite-preview'];
 
   if (!userMessage || !sessionId) {
     throw createError({ statusCode: 400, statusMessage: 'Missing sessionId or userMessage' });
@@ -35,24 +38,80 @@ export default defineEventHandler(async (event) => {
       chatSystemInstruction: DEFAULT_CHAT_INSTRUCTION
     };
 
-    // อ่านข้อมูลจาก snapshot ที่ init ไว้แล้ว
+    // อ่านข้อมูลจาก snapshot ที่ init ไว้แล้ว (NDJSON format ใหม่)
     const storage = useStorage('snapshots');
-    const csv: any = await storage.getItem(`chat-direct-${sessionId}.csv`);
 
-    if (!csv) {
+    // ลอง NDJSON ก่อน (format ใหม่) — fallback ไป CSV (format เก่า)
+    // ใช้ generic <string> เพื่อให้ unstorage คืน string | null แทน StorageValue
+    const ndjson = await storage.getItem<string>(`chat-direct-${sessionId}.ndjson`);
+    const csv = !ndjson ? await storage.getItem<string>(`chat-direct-${sessionId}.csv`) : null;
+
+    if (!ndjson && !csv) {
       throw createError({ statusCode: 404, statusMessage: 'Session หมดอายุหรือไม่พบข้อมูล กรุณาเปิด Modal ใหม่อีกครั้ง' });
     }
 
-    const lines = csv.split('\n').filter((l: string) => l.trim() !== '');
-    const columns = lines[0] ? lines[0].split(',') : [];
-    const rows = lines.slice(1).map((line: string) => {
-      const values = line.split(',');
-      const obj: any = {};
-      columns.forEach((col: string, index: number) => {
-        obj[col.trim()] = values[index] ? values[index].trim() : '-';
+    let rows: Record<string, string>[];
+    let columns: string[];
+
+    if (ndjson) {
+      // --- Parse NDJSON (JSON Lines) ---
+      // แต่ละบรรทัดคือ JSON object 1 ตัว ปลอดภัยจากปัญหา delimiter ทุกชนิด
+      rows = ndjson
+        .split('\n')
+        .map(line => line.trim())
+        .filter(line => line.length > 0)
+        .map(line => {
+          try {
+            return JSON.parse(line) as Record<string, string>;
+          } catch {
+            return {} as Record<string, string>;
+          }
+        })
+        .filter(obj => Object.keys(obj).length > 0);
+      // เก็บ rows[0] ลงตัวแปรก่อน เพื่อให้ TypeScript narrow type ได้ (rows[0] อาจเป็น undefined ตาม type system)
+      const firstRow = rows[0];
+      columns = firstRow ? Object.keys(firstRow) : [];
+    } else {
+      // --- Fallback: Parse CSV (format เก่า) ด้วย RFC 4180 parser ---
+      // รองรับ quoted fields ที่มี comma หรือ newline ข้างใน
+      const parseQuotedCsv = (text: string): string[][] => {
+        const result: string[][] = [];
+        let row: string[] = [];
+        let field = '';
+        let inQuotes = false;
+        let i = 0;
+        while (i < text.length) {
+          const ch = text[i];
+          if (inQuotes) {
+            if (ch === '"') {
+              if (text[i + 1] === '"') { field += '"'; i += 2; continue; } // escaped quote
+              inQuotes = false;
+            } else {
+              field += ch;
+            }
+          } else {
+            if (ch === '"') { inQuotes = true; }
+            else if (ch === ',') { row.push(field.trim()); field = ''; }
+            else if (ch === '\n' || (ch === '\r' && text[i + 1] === '\n')) {
+              row.push(field.trim()); field = '';
+              result.push(row); row = [];
+              if (ch === '\r') i++;
+            } else { field += ch; }
+          }
+          i++;
+        }
+        if (field || row.length > 0) { row.push(field.trim()); result.push(row); }
+        return result;
+      };
+
+      const parsed = parseQuotedCsv(csv!);
+      columns = parsed[0] ?? [];
+      rows = parsed.slice(1).map(vals => {
+        const obj: Record<string, string> = {};
+        columns.forEach((col, idx) => { obj[col] = vals[idx] ?? '-'; });
+        return obj;
       });
-      return obj;
-    });
+    }
 
     const totalCount = rows.length;
 
@@ -73,8 +132,12 @@ export default defineEventHandler(async (event) => {
     }));
 
     const genAI = new GoogleGenerativeAI(apiKey);
+    // ใช้ modelOverride ถ้า user เลือกและอยู่ใน whitelist — ไม่งั้นใช้ค่าจาก admin settings
+    const resolvedModel = (modelOverride && ALLOWED_MODELS.includes(modelOverride))
+      ? modelOverride
+      : (settings.chatModel || DEFAULT_CHAT_MODEL);
     const model = genAI.getGenerativeModel({
-      model: settings.chatModel || DEFAULT_CHAT_MODEL,
+      model: resolvedModel,
       systemInstruction: `${settings.chatSystemInstruction}
 
 **สำคัญมาก**: หากผู้ใช้ถามเรื่องสถิติ สัดส่วน ขอดูเป็นกราฟ หรือคุณมองว่าอธิบายด้วยกราฟจะเข้าใจง่ายกว่า ให้คุณสร้างกราฟโดยใช้รูปแบบ JSON block นี้เท่านั้น:
