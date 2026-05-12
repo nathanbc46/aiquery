@@ -987,6 +987,7 @@ const clearInput = () => {
   prompt.value = ''
   originalPrompt.value = ''
   generatedResult.value = null
+  debugInfo.value = null
   clearFile()
   if (textareaRef.value) textareaRef.value.focus()
 }
