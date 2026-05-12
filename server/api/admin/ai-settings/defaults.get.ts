@@ -22,7 +22,9 @@ export default defineEventHandler(async (event) => {
       analyzeSystemInstruction: DEFAULT_ANALYZE_INSTRUCTION,
       chatModel: DEFAULT_CHAT_MODEL,
       chatSystemInstruction: DEFAULT_CHAT_INSTRUCTION,
-      maxResultsLimit: DEFAULT_MAX_RESULTS_LIMIT
+      maxResultsLimit: DEFAULT_MAX_RESULTS_LIMIT,
+      useHybridSchema: false,
+      isDebugMode: false
     }
   };
 });

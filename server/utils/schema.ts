@@ -60,6 +60,8 @@ export const aiSettings = mysqlTable('ai_settings', {
   chatModel: varchar('chat_model', { length: 100 }).notNull().default('gemini-2.0-flash'),
   chatSystemInstruction: text('chat_system_instruction').notNull(),
   maxResultsLimit: int('max_results_limit').default(5000),
+  useHybridSchema: boolean('use_hybrid_schema').default(false),
+  isDebugMode: boolean('is_debug_mode').default(false),
   updatedAt: timestamp('updated_at').defaultNow().onUpdateNow(),
 });
 

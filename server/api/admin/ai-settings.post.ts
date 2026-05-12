@@ -15,7 +15,9 @@ export default defineEventHandler(async (event) => {
     analyzeSystemInstruction,
     chatModel,
     chatSystemInstruction,
-    maxResultsLimit
+    maxResultsLimit,
+    useHybridSchema,
+    isDebugMode
   } = body;
 
   try {
@@ -34,7 +36,9 @@ export default defineEventHandler(async (event) => {
           analyzeSystemInstruction,
           chatModel,
           chatSystemInstruction,
-          maxResultsLimit
+          maxResultsLimit,
+          useHybridSchema,
+          isDebugMode
         })
         .where(eq(aiSettings.id, 'global'));
     } else {
@@ -49,7 +53,9 @@ export default defineEventHandler(async (event) => {
         analyzeSystemInstruction,
         chatModel,
         chatSystemInstruction,
-        maxResultsLimit
+        maxResultsLimit,
+        useHybridSchema,
+        isDebugMode
       });
     }
 

@@ -32,7 +32,9 @@ const settings = ref({
   analyzeSystemInstruction: '',
   chatModel: '',
   chatSystemInstruction: '',
-  maxResultsLimit: 5000
+  maxResultsLimit: 5000,
+  useHybridSchema: false,
+  isDebugMode: false
 })
 
 const restoreRefineDefaults = async () => {
@@ -83,7 +85,9 @@ const restoreOtherDefaults = async () => {
   try {
     const { defaults } = await $fetch<any>('/api/admin/ai-settings/defaults')
     settings.value.maxResultsLimit = defaults.maxResultsLimit
-    toast.info('คืนค่าเริ่มต้น', 'กู้คืนค่าขีดจำกัดการดึงข้อมูลเป็น 5,000 รายการแล้ว')
+    settings.value.useHybridSchema = defaults.useHybridSchema
+    settings.value.isDebugMode = defaults.isDebugMode
+    toast.info('คืนค่าเริ่มต้น', 'กู้คืนการตั้งค่าทั่วไปแล้ว')
   } catch (e) {
     toast.error('ล้มเหลว', 'ไม่สามารถดึงค่าเริ่มต้นได้')
   }
@@ -488,6 +492,54 @@ onMounted(() => {
               <p class="text-[11px] text-slate-500 leading-relaxed">
                 กำหนดจำนวนแถวสูงสุดที่ระบบอนุญาตให้ดึงข้อมูลในหนึ่งครั้ง (Preview และ Export) เพื่อป้องกันภาระหนักต่อฐานข้อมูล
               </p>
+            </div>
+
+            <!-- Hybrid & Debug Default -->
+            <div class="space-y-4">
+              <label class="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                Feature Defaults (ค่าเริ่มต้นสำหรับผู้ใช้)
+              </label>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div 
+                  @click="settings.useHybridSchema = !settings.useHybridSchema"
+                  class="flex items-center justify-between p-4 rounded-2xl border-2 transition-all cursor-pointer"
+                  :class="settings.useHybridSchema ? 'bg-blue-50 border-blue-200 dark:bg-blue-900/20 dark:border-blue-800' : 'bg-slate-50 border-slate-100 dark:bg-slate-950 dark:border-slate-900'"
+                >
+                  <div class="flex items-center gap-3">
+                    <div class="w-8 h-8 rounded-lg flex items-center justify-center" :class="settings.useHybridSchema ? 'bg-blue-500 text-white' : 'bg-slate-200 text-slate-400 dark:bg-slate-800'">
+                      <Cpu class="w-4 h-4" />
+                    </div>
+                    <div>
+                      <p class="text-xs font-bold text-slate-900 dark:text-white">Hybrid Schema (Default)</p>
+                      <p class="text-[10px] text-slate-500">เปิดใช้งานการเลือกตารางอัตโนมัติเป็นค่าเริ่มต้น</p>
+                    </div>
+                  </div>
+                  <div class="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox" v-model="settings.useHybridSchema" class="sr-only peer">
+                    <div class="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                  </div>
+                </div>
+
+                <div 
+                  @click="settings.isDebugMode = !settings.isDebugMode"
+                  class="flex items-center justify-between p-4 rounded-2xl border-2 transition-all cursor-pointer"
+                  :class="settings.isDebugMode ? 'bg-indigo-50 border-indigo-200 dark:bg-indigo-900/20 dark:border-indigo-800' : 'bg-slate-50 border-slate-100 dark:bg-slate-950 dark:border-slate-900'"
+                >
+                  <div class="flex items-center gap-3">
+                    <div class="w-8 h-8 rounded-lg flex items-center justify-center" :class="settings.isDebugMode ? 'bg-indigo-500 text-white' : 'bg-slate-200 text-slate-400 dark:bg-slate-800'">
+                      <Terminal class="w-4 h-4" />
+                    </div>
+                    <div>
+                      <p class="text-xs font-bold text-slate-900 dark:text-white">Debug Mode (Default)</p>
+                      <p class="text-[10px] text-slate-500">แสดงข้อมูล Debug เป็นค่าเริ่มต้น</p>
+                    </div>
+                  </div>
+                  <div class="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox" v-model="settings.isDebugMode" class="sr-only peer">
+                    <div class="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>

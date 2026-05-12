@@ -4,6 +4,7 @@ import { useDb } from '../../utils/db';
 import { sql, eq } from 'drizzle-orm';
 import { aiSettings } from '../../utils/schema';
 import { getAuthSession } from '../../utils/auth';
+import { pruneSchema } from '../../utils/schemaPruning';
 
 export default defineEventHandler(async (event) => {
   // 1. ตรวจสอบสิทธิ์
@@ -15,6 +16,8 @@ export default defineEventHandler(async (event) => {
   const body = await readBody(event);
   const prompt = body.prompt;
   const contextData = body.contextData; // ข้อมูลจากไฟล์ที่อัปโหลด
+  const useHybridSchema = body.useHybridSchema ?? false;
+  const isDebugMode = body.isDebugMode ?? false;
 
   if (!prompt) {
     throw createError({ statusCode: 400, statusMessage: 'Prompt is required' });
@@ -48,11 +51,32 @@ export default defineEventHandler(async (event) => {
     // Inject the dynamic limit into the system instruction
     systemInstruction = systemInstruction.replace('{MAX_LIMIT}', maxLimit.toString());
 
+    // --- HYBRID SCHEMA SELECTION ---
+    let debugInfo = null;
+    if (useHybridSchema) {
+      const pruningResult = pruneSchema(systemInstruction, prompt);
+      systemInstruction = pruningResult.finalInstruction;
+      if (isDebugMode) {
+        debugInfo = {
+          isHybrid: true,
+          selectedTables: pruningResult.selectedTables,
+          reductionPercentage: pruningResult.reductionPercentage
+        };
+      }
+    } else if (isDebugMode) {
+      // If not hybrid but debug is on, we still want to show what was sent (everything)
+      debugInfo = {
+        isHybrid: false,
+        selectedTables: ['ALL TABLES (Full Context)'],
+        reductionPercentage: 0
+      };
+    }
+
     // Force explanation format regardless of DB settings
     systemInstruction += `\n\nCRITICAL OUTPUT FORMAT OVERRIDE: 
-For the "explanation" field in your JSON response, you MUST format it as a Markdown bulleted list (-). 
-Use **bold** text to highlight important keywords, table names, field names, or specific conditions. 
-Make the explanation concise and easy to read for a non-technical manager.`;
+    For the "explanation" field in your JSON response, you MUST format it as a Markdown bulleted list (-). 
+    Use **bold** text to highlight important keywords, table names, field names, or specific conditions. 
+    Make the explanation concise and easy to read for a non-technical manager.`;
 
     const genAI = new GoogleGenerativeAI(apiKey);
     
@@ -173,7 +197,8 @@ Make the explanation concise and easy to read for a non-technical manager.`;
       maxResultsLimit: maxLimit,
       previewData: previewData,
       dbError: dbError,
-      limitOverridden: limitOverridden
+      limitOverridden: limitOverridden,
+      debug: debugInfo
     };
 
 

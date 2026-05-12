@@ -83,6 +83,9 @@ const generatedZohoLink = ref('')
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
 const generateAbortController = ref<AbortController | null>(null)
 const isCancelled = ref(false)
+const useHybridSchema = ref(false)
+const isDebugMode = ref(false)
+const debugInfo = ref<any>(null)
 
 // File Upload State
 const fileInputRef = ref<HTMLInputElement | null>(null)
@@ -744,9 +747,19 @@ const { data: systemConfig } = useFetch<any>('/api/system-config')
 const suggestions = computed(() => systemConfig.value?.suggestions || [])
 
 // \u0e15\u0e31\u0e49\u0e07\u0e04\u0e48\u0e32 default chatModel \u0e08\u0e32\u0e01 admin settings \u0e40\u0e21\u0e37\u0e48\u0e2d\u0e42\u0e2b\u0e25\u0e14\u0e40\u0e2a\u0e23\u0e47\u0e08
+const settingsInitialized = ref(false)
 watch(systemConfig, (cfg) => {
-  if (cfg?.chatModel && !chatModel.value) {
-    chatModel.value = cfg.chatModel
+  if (cfg && !settingsInitialized.value) {
+    if (cfg.chatModel && !chatModel.value) {
+      chatModel.value = cfg.chatModel
+    }
+    if (cfg.useHybridSchema !== undefined) {
+      useHybridSchema.value = cfg.useHybridSchema
+    }
+    if (cfg.isDebugMode !== undefined) {
+      isDebugMode.value = cfg.isDebugMode
+    }
+    settingsInitialized.value = true
   }
 }, { immediate: true })
 
@@ -1081,13 +1094,16 @@ const generateSql = async () => {
       method: 'POST',
       body: { 
         prompt: prompt.value,
-        contextData: uploadedData.value // ส่งข้อมูลจากไฟล์ไปด้วย
+        contextData: uploadedData.value,
+        useHybridSchema: useHybridSchema.value,
+        isDebugMode: isDebugMode.value
       },
       signal: generateAbortController.value.signal
     })
     
     if (response.success && (response.status === 'success' || response.status === 'error')) {
       generatedResult.value = response
+      debugInfo.value = response.debug || null
       
       // ถ้าเป็น Admin หรือ Manager ให้เปิด Preview อัตโนมัติเลย
       if (isAdmin.value || user.value?.role === 'manager') {
@@ -1379,6 +1395,25 @@ const highlightSql = (sqlStr: string) => {
               </div>
               <span class="uppercase tracking-widest">AI กำลังประมวลผล...</span>
             </div>
+            
+            <!-- Hybrid Schema & Debug Toggle -->
+            <div class="flex items-center gap-4 bg-white/40 dark:bg-slate-800/40 px-4 py-2 rounded-2xl border border-white/50 dark:border-slate-700/50 backdrop-blur-md shadow-sm">
+              <label class="flex items-center gap-2 cursor-pointer group" title="เปิดเพื่อเลือกเฉพาะตารางที่เกี่ยวข้อง (ประหยัด Token และ AI โฟกัสดีขึ้น)">
+                <div class="relative inline-flex items-center cursor-pointer">
+                  <input type="checkbox" v-model="useHybridSchema" class="sr-only peer">
+                  <div class="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+                </div>
+                <span class="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider group-hover:text-blue-500 transition-colors">Hybrid Schema</span>
+              </label>
+              <div class="w-px h-3 bg-slate-300 dark:bg-slate-600"></div>
+              <label class="flex items-center gap-2 cursor-pointer group" title="เปิดเพื่อดูข้อมูลตารางที่ AI นำไปใช้ประมวลผล">
+                <div class="relative inline-flex items-center cursor-pointer">
+                  <input type="checkbox" v-model="isDebugMode" class="sr-only peer">
+                  <div class="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
+                </div>
+                <span class="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider group-hover:text-indigo-500 transition-colors">Debug Mode</span>
+              </label>
+            </div>
           </div>
           
           <div class="relative group">
@@ -1583,6 +1618,36 @@ const highlightSql = (sqlStr: string) => {
             <div>
               <p class="text-rose-900 dark:text-rose-300 font-bold uppercase tracking-wider text-xs mb-1">AI Generation Failed</p>
               <p class="text-rose-700 dark:text-rose-400 text-sm font-medium">{{ error }}</p>
+            </div>
+          </div>
+        </transition>
+        
+        <!-- Debug Info Alert -->
+        <transition name="fade">
+          <div v-if="debugInfo" class="mt-4 p-4 bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-2xl animate-in slide-in-from-top-2 duration-300">
+            <div class="flex items-center justify-between mb-3">
+              <div class="flex items-center gap-2">
+                <Terminal class="w-4 h-4 text-indigo-500" />
+                <span class="text-[10px] font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-[0.2em]">Debug: Schema Context Selected</span>
+              </div>
+              <button @click="debugInfo = null" class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors">
+                <X class="w-3.5 h-3.5" />
+              </button>
+            </div>
+            <div class="flex flex-wrap gap-2">
+              <span 
+                v-for="table in debugInfo.selectedTables" 
+                :key="table"
+                class="px-2 py-1 bg-white dark:bg-slate-900 text-[10px] font-mono text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700 rounded-md"
+              >
+                {{ table }}
+              </span>
+              <span v-if="debugInfo.isHybrid" class="px-2 py-1 bg-blue-50 dark:bg-blue-900/30 text-[10px] font-black text-blue-600 dark:text-blue-400 rounded-md border border-blue-100 dark:border-blue-800/50">
+                HYBRID ACTIVE ({{ debugInfo.reductionPercentage }}% reduced)
+              </span>
+            </div>
+            <div class="mt-2 text-[9px] text-slate-400 italic">
+              * ข้อมูลที่แสดงคือตารางที่ AI ใช้ในการพิจารณาสร้าง SQL สำหรับคำถามนี้
             </div>
           </div>
         </transition>

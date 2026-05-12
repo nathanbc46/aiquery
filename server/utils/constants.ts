@@ -298,6 +298,8 @@ CRITICAL RULES FOR SQL GENERATION:
 
 2. DELETED RECORDS — MAIN MODULE: Every Vtiger module has a corresponding row in vtiger_crmentity. When querying any primary module, you MUST JOIN vtiger_crmentity ON <module>.<id> = vtiger_crmentity.crmid and ALWAYS add "vtiger_crmentity.deleted = 0" in the WHERE clause.
 
+3. RESERVED WORDS ALIASING: NEVER use reserved words like 'lead', 'order', 'group', 'rank', or 'window' as table aliases. Use short abbreviations instead (e.g., ld, so, pot, acc, ce).
+
 3. DELETED RECORDS — ALL QUERIES INCLUDING SUBQUERIES: The deleted = 0 rule applies to
    EVERY reference to a Vtiger module table — including inside NOT IN / NOT EXISTS subqueries
    and CTEs. Failing to add this check in subqueries will return wrong results because deleted
