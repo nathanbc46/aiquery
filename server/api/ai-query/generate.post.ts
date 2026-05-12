@@ -14,6 +14,7 @@ export default defineEventHandler(async (event) => {
 
   const body = await readBody(event);
   const prompt = body.prompt;
+  const contextData = body.contextData; // ข้อมูลจากไฟล์ที่อัปโหลด
 
   if (!prompt) {
     throw createError({ statusCode: 400, statusMessage: 'Prompt is required' });
@@ -60,7 +61,28 @@ Make the explanation concise and easy to read for a non-technical manager.`;
       systemInstruction: systemInstruction
     });
 
-    const result = await model.generateContent(prompt);
+    const DATA_CONTEXT_LIMIT = 200;
+
+    let finalPrompt = prompt;
+    if (Array.isArray(contextData) && contextData.length > 0) {
+      // จำกัดข้อมูลที่ส่งให้ AI เพื่อไม่ให้เกิน Token Limit
+      const dataSample = contextData.slice(0, DATA_CONTEXT_LIMIT);
+      const hasMore = contextData.length > DATA_CONTEXT_LIMIT;
+      
+      finalPrompt = `[ข้อมูลประกอบจากไฟล์ที่ผู้ใช้อัปโหลด]\n`;
+      finalPrompt += `จำนวนข้อมูลทั้งหมดในไฟล์: ${contextData.length} แถว\n`;
+      finalPrompt += `ตัวอย่างข้อมูล (${dataSample.length} แถวแรก):\n${JSON.stringify(dataSample, null, 2)}\n`;
+      if (hasMore) {
+        finalPrompt += `... (มีข้อมูลอีก ${contextData.length - DATA_CONTEXT_LIMIT} แถวที่ไม่ได้แสดงในตัวอย่างนี้แต่คุณสามารถสรุป Logic จากตัวอย่างได้)\n`;
+      }
+      finalPrompt += `\n[คำถามของผู้ใช้]\n${prompt}\n\n`;
+      finalPrompt += `คำแนะนำสำหรับ AI:\n`;
+      finalPrompt += `- หากผู้ใช้ต้องการให้ Match ข้อมูลจากไฟล์กับ Database ให้คุณดึงค่า Key ที่สำคัญ (เช่น ชื่อ, อีเมล, หรือ ID) จากไฟล์มาสร้างเป็นเงื่อนไข IN (...) ใน SQL\n`;
+      finalPrompt += `- หากข้อมูลในไฟล์มีจำนวนมาก ให้ใช้เฉพาะตัวอย่างที่สำคัญในการสร้าง Query และอธิบายให้ผู้ใช้ทราบว่าคุณใช้ข้อมูลจากไฟล์มาช่วย\n`;
+      finalPrompt += `- ให้ความสำคัญกับการ Join ตารางใน Vtiger ให้ถูกต้องตาม Schema`;
+    }
+
+    const result = await model.generateContent(finalPrompt);
     let responseText = result.response.text().trim();
     
     // Clean up Markdown code block formatting if Gemini ignored the instruction

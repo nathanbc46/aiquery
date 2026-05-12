@@ -40,12 +40,14 @@ import {
   Share2,
   Square,
   SquareCheck,
-  MousePointerClick
+  MousePointerClick,
+  Upload
 } from 'lucide-vue-next'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import ApexCharts from 'apexcharts'
 import 'apexcharts/features/exports'
+import * as XLSX from 'xlsx'
 
 
 const prompt = ref('')
@@ -81,6 +83,13 @@ const generatedZohoLink = ref('')
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
 const generateAbortController = ref<AbortController | null>(null)
 const isCancelled = ref(false)
+
+// File Upload State
+const fileInputRef = ref<HTMLInputElement | null>(null)
+const uploadedData = ref<any[] | null>(null)
+const uploadedFileName = ref('')
+const isParsingFile = ref(false)
+const DATA_CONTEXT_LIMIT = 200
 
 const { data: auth } = await useFetch<any>('/api/auth/me')
 const user = computed(() => auth.value?.user)
@@ -792,6 +801,61 @@ const chatContextLabel = computed(() => {
   return `${total} รายการ · AI เห็นข้อมูลครบทั้งหมด`
 })
 
+const handleFileUpload = (event: Event) => {
+  const target = event.target as HTMLInputElement
+  const file = target.files?.[0]
+  if (!file) return
+
+  uploadedFileName.value = file.name
+  isParsingFile.value = true
+  
+  const reader = new FileReader()
+  reader.onload = (e) => {
+    try {
+      const data = new Uint8Array(e.target?.result as ArrayBuffer)
+      const workbook = XLSX.read(data, { type: 'array' })
+      const firstSheetName = workbook.SheetNames[0]
+      if (!firstSheetName) {
+        toast.error('ไฟล์ไม่ถูกต้อง', 'ไม่พบแผ่นงานในไฟล์ที่อัปโหลด')
+        clearFile()
+        return
+      }
+      const worksheet = workbook.Sheets[firstSheetName]
+      if (!worksheet) {
+        toast.error('ไฟล์ไม่ถูกต้อง', 'ไม่สามารถอ่านข้อมูลแผ่นงานได้')
+        clearFile()
+        return
+      }
+      const json = XLSX.utils.sheet_to_json(worksheet)
+      
+      if (Array.isArray(json) && json.length > 0) {
+        uploadedData.value = json
+        toast.success('อัปโหลดไฟล์สำเร็จ', `โหลดข้อมูลจาก ${file.name} จำนวน ${json.length} แถว เรียบร้อยแล้ว`)
+      } else {
+        toast.error('ไฟล์ไม่มีข้อมูล', 'ไม่พบข้อมูลในไฟล์ที่อัปโหลด')
+        clearFile()
+      }
+    } catch (err) {
+      console.error('File parsing error:', err)
+      toast.error('ข้อผิดพลาด', 'ไม่สามารถอ่านไฟล์ได้ โปรดตรวจสอบรูปแบบไฟล์')
+      clearFile()
+    } finally {
+      isParsingFile.value = false
+    }
+  }
+  reader.readAsArrayBuffer(file)
+}
+
+const clearFile = () => {
+  uploadedData.value = null
+  uploadedFileName.value = ''
+  if (fileInputRef.value) fileInputRef.value.value = ''
+}
+
+const triggerFileUpload = () => {
+  fileInputRef.value?.click()
+}
+
 const renderedExplanation = computed(() => {
   if (!generatedResult.value?.explanation) return ''
   let text = generatedResult.value.explanation
@@ -910,6 +974,7 @@ const clearInput = () => {
   prompt.value = ''
   originalPrompt.value = ''
   generatedResult.value = null
+  clearFile()
   if (textareaRef.value) textareaRef.value.focus()
 }
 
@@ -1014,7 +1079,10 @@ const generateSql = async () => {
   try {
     const response = await $fetch<any>('/api/ai-query/generate', {
       method: 'POST',
-      body: { prompt: prompt.value },
+      body: { 
+        prompt: prompt.value,
+        contextData: uploadedData.value // ส่งข้อมูลจากไฟล์ไปด้วย
+      },
       signal: generateAbortController.value.signal
     })
     
@@ -1323,8 +1391,49 @@ const highlightSql = (sqlStr: string) => {
               class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-[1.5rem] px-6 py-5 pr-14 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder:text-slate-600 focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 dark:focus:border-blue-400 transition-all resize-y min-h-[160px] text-lg leading-relaxed shadow-inner disabled:opacity-50"
               :disabled="isGenerating"
             ></textarea>
+
+            <!-- File Input (Hidden) -->
+            <input 
+              type="file" 
+              ref="fileInputRef" 
+              class="hidden" 
+              accept=".csv, .xlsx, .xls"
+              @change="handleFileUpload"
+            />
+
+            <!-- Uploaded File Badge -->
+            <div v-if="uploadedFileName" class="absolute left-6 bottom-5 flex flex-col items-start gap-2 animate-in slide-in-from-left-2 duration-300">
+              <div class="flex items-center gap-2 px-3 py-1.5 bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 text-[11px] font-black rounded-xl border border-emerald-100 dark:border-emerald-800/50 shadow-sm">
+                <CheckCircle2 class="w-3.5 h-3.5" />
+                <span class="max-w-[200px] truncate">{{ uploadedFileName }}</span>
+                <span class="opacity-50">({{ uploadedData?.length }} แถว)</span>
+                <button @click="clearFile" type="button" class="ml-1 p-0.5 hover:bg-emerald-200 dark:hover:bg-emerald-800 rounded-full transition-colors">
+                  <X class="w-3 h-3" />
+                </button>
+              </div>
+              <div v-if="uploadedData && uploadedData.length > DATA_CONTEXT_LIMIT" class="flex items-center gap-1.5 px-2 text-[9px] font-bold text-amber-600 dark:text-amber-400 uppercase tracking-tighter">
+                <AlertTriangle class="w-3 h-3" />
+                AI จะพิจารณาเฉพาะ {{ DATA_CONTEXT_LIMIT }} แถวแรกของไฟล์นี้
+              </div>
+              <div v-else class="px-2 text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-tighter">
+                ระบบจะส่งข้อมูลในไฟล์นี้ให้ AI ช่วยประมวลผล
+              </div>
+            </div>
+
             <div class="absolute right-5 bottom-5 flex items-center gap-2">
               <ClientOnly>
+                <button 
+                  type="button"
+                  @click="triggerFileUpload"
+                  :disabled="isGenerating || isParsingFile"
+                  class="flex items-center gap-2 px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 text-[10px] font-black rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all active:scale-95 uppercase tracking-widest disabled:opacity-50"
+                  title="แนบไฟล์ CSV หรือ Excel เพื่อใช้เป็นข้อมูลประกอบ"
+                >
+                  <Upload v-if="!isParsingFile" class="w-3.5 h-3.5" />
+                  <Loader2 v-else class="w-3.5 h-3.5 animate-spin" />
+                  {{ uploadedFileName ? 'เปลี่ยนไฟล์' : 'แนบไฟล์' }}
+                </button>
+
                 <button 
                   v-if="prompt"
                   type="button"
