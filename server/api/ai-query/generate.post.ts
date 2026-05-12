@@ -157,8 +157,9 @@ export default defineEventHandler(async (event) => {
     jsonResult.sql = finalSql;
 
     // Step 2: Get Preview Data (Limit based on role)
+    const generateOnly = body.generateOnly ?? false;
     const isAdminOrManager = session.role === 'admin' || session.role === 'manager';
-    const previewLimit = isAdminOrManager ? 50 : 10;
+    const previewLimit = generateOnly ? 1 : (isAdminOrManager ? 50 : 10);
     const previewSql = jsonResult.sql.replace(/LIMIT\s+\d+$/i, '').replace(/;$/, '') + ` LIMIT ${previewLimit}`;
     
     let previewData: any[] = [];
@@ -166,23 +167,27 @@ export default defineEventHandler(async (event) => {
 
     let dbError: string | null = null;
     try {
-      // Get actual count first
-      const countSql = `SELECT COUNT(*) as total FROM (${jsonResult.sql.replace(/;$/, '')}) as subquery`;
-      const [countRes]: any = await db.execute(sql.raw(countSql));
-      previewCount = countRes[0]?.total || 0;
+      if (!generateOnly) {
+        // Get actual count first
+        const countSql = `SELECT COUNT(*) as total FROM (${jsonResult.sql.replace(/;$/, '')}) as subquery`;
+        const [countRes]: any = await db.execute(sql.raw(countSql));
+        previewCount = countRes[0]?.total || 0;
+      }
 
-      // Get preview records
+      // Get preview records (Even for generateOnly, to check syntax)
       const [rows]: any = await db.execute(sql.raw(previewSql));
 
-      previewData = (rows as any[]).map(row => {
-        if (isAdminOrManager) return row; // Admin/Manager ดูข้อมูลดิบได้เลย ไม่ต้อง Mask
-        
-        const maskedRow: any = {};
-        for (const key in row) {
-          maskedRow[key] = maskSensitiveData(row[key]);
-        }
-        return maskedRow;
-      });
+      if (!generateOnly) {
+        previewData = (rows as any[]).map(row => {
+          if (isAdminOrManager) return row; // Admin/Manager ดูข้อมูลดิบได้เลย ไม่ต้อง Mask
+          
+          const maskedRow: any = {};
+          for (const key in row) {
+            maskedRow[key] = maskSensitiveData(row[key]);
+          }
+          return maskedRow;
+        });
+      }
     } catch (err: any) {
       console.error('Preview Execution Error:', err);
       dbError = err.message || 'Database execution failed';
@@ -190,7 +195,7 @@ export default defineEventHandler(async (event) => {
 
     return {
       success: true,
-      status: dbError ? 'error' : 'success',
+      status: generateOnly && !dbError ? 'draft' : (dbError ? 'error' : 'success'),
       sql: jsonResult.sql,
       explanation: jsonResult.explanation,
       previewCount: previewCount,
