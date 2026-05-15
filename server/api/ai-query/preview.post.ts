@@ -54,8 +54,8 @@ export default defineEventHandler(async (event) => {
     const settingsList = await db.select().from(aiSettings).where(eq(aiSettings.id, 'global')).limit(1);
     const maxResultsLimit = settingsList[0]?.maxResultsLimit || DEFAULT_MAX_RESULTS_LIMIT;
 
-    // ตั้งเวลา Timeout สำหรับ SQL นี้ (ป้องกันค้าง) - 15 วินาที
-    await db.execute(sql.raw('SET SESSION MAX_EXECUTION_TIME = 15000'));
+    // ตั้งเวลา Timeout สำหรับ SQL นี้ (ป้องกันค้าง) - 60 วินาที
+    await db.execute(sql.raw('SET SESSION MAX_EXECUTION_TIME = 60000'));
 
     let totalCount = 0;
     let dataRows = [];
