@@ -1202,7 +1202,7 @@ const revertToOriginalSql = () => {
   }
 }
 
-const requestApproval = async () => {
+const requestApproval = async (skipDownload: boolean = false) => {
   if (!generatedResult.value) return
 
   isRequesting.value = true
@@ -1221,7 +1221,7 @@ const requestApproval = async () => {
     if (response.success) {
       if (response.autoApproved) {
         // เริ่มดาวน์โหลดไฟล์ทันที (สำหรับ Admin)
-        if (isAdmin.value && response.requestId) {
+        if (isAdmin.value && response.requestId && !skipDownload) {
           const fn = (csvFilename.value || 'AI_Export').replace(/[^a-zA-Z0-9ก-๙\s_-]/g, '').trim().replace(/\s+/g, '_') || 'AI_Export'
           const ownerParam = csvOwnerVtigerId.value ? `&ownerVtigerId=${csvOwnerVtigerId.value}` : ''
           window.location.href = `/api/ai-query/export?id=${response.requestId}&filename=${encodeURIComponent(fn)}${ownerParam}`
@@ -2754,7 +2754,16 @@ const highlightSql = (sqlStr: string) => {
                   ยกเลิก
                 </button>
                 <button
-                  @click="requestApproval()"
+                  @click="requestApproval(true)"
+                  :disabled="isRequesting"
+                  class="px-8 py-3.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-sm font-bold text-white rounded-xl transition-all shadow-lg shadow-blue-500/20 flex items-center gap-2"
+                >
+                  <RotateCcw v-if="isRequesting" class="w-4 h-4 animate-spin" />
+                  <CheckCircle2 v-else class="w-4 h-4" />
+                  ยืนยัน
+                </button>
+                <button
+                  @click="requestApproval(false)"
                   :disabled="isRequesting"
                   class="px-8 py-3.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-sm font-bold text-white rounded-xl transition-all shadow-lg shadow-emerald-500/20 flex items-center gap-2"
                 >
