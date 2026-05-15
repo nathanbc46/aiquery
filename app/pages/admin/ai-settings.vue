@@ -32,10 +32,31 @@ const settings = ref({
   analyzeSystemInstruction: '',
   chatModel: '',
   chatSystemInstruction: '',
+  optimizeModel: '',
   maxResultsLimit: 5000,
   useHybridSchema: false,
   isDebugMode: false
 })
+
+const availableModels = ref<string[]>([])
+const isFetchingModels = ref(false)
+
+const fetchAvailableModels = async () => {
+  if (availableModels.value.length > 0) return
+  isFetchingModels.value = true
+  try {
+    const response = await $fetch<any>('/api/admin/models')
+    if (response.success && response.models) {
+      availableModels.value = response.models.map((m: any) => m.name)
+    } else {
+      toast.error('ล้มเหลว', response.error || 'ไม่สามารถดึงข้อมูลโมเดลได้')
+    }
+  } catch (e) {
+    toast.error('ล้มเหลว', 'เกิดข้อผิดพลาดในการดึงข้อมูลโมเดล')
+  } finally {
+    isFetchingModels.value = false
+  }
+}
 
 const restoreRefineDefaults = async () => {
   try {
@@ -258,10 +279,25 @@ onMounted(() => {
               placeholder="เช่น gemini-2.0-flash"
             />
             <div class="flex flex-wrap gap-2 mt-2 items-center">
-              <span class="text-[10px] text-slate-500 font-bold uppercase tracking-wider">แนะนำ:</span>
-              <button @click="settings.refineModel = 'gemini-2.5-flash'" class="px-2 py-1 bg-slate-100 hover:bg-indigo-100 dark:bg-slate-800 dark:hover:bg-indigo-900/50 text-slate-600 dark:text-slate-300 text-[10px] rounded-md transition-colors font-medium border border-slate-200 dark:border-slate-700">gemini-2.5-flash</button>
-              <button @click="settings.refineModel = 'gemini-3.1-flash-lite-preview'" class="px-2 py-1 bg-slate-100 hover:bg-indigo-100 dark:bg-slate-800 dark:hover:bg-indigo-900/50 text-slate-600 dark:text-slate-300 text-[10px] rounded-md transition-colors font-medium border border-slate-200 dark:border-slate-700">gemini-3.1-flash-lite-preview</button>
-              <button @click="settings.refineModel = 'gemini-2.5-pro'" class="px-2 py-1 bg-slate-100 hover:bg-indigo-100 dark:bg-slate-800 dark:hover:bg-indigo-900/50 text-slate-600 dark:text-slate-300 text-[10px] rounded-md transition-colors font-medium border border-slate-200 dark:border-slate-700">gemini-2.5-pro</button>
+              <span class="text-[10px] text-slate-500 font-bold uppercase tracking-wider">ตัวเลือก:</span>
+              <button 
+                v-if="availableModels.length === 0"
+                @click="fetchAvailableModels" 
+                :disabled="isFetchingModels"
+                class="px-3 py-1 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 text-[10px] rounded-md transition-colors font-bold flex items-center gap-1 border border-indigo-200 dark:border-indigo-800/50"
+              >
+                <RotateCcw v-if="isFetchingModels" class="w-3 h-3 animate-spin" />
+                <Database v-else class="w-3 h-3" />
+                ดึงรายชื่อโมเดลล่าสุด
+              </button>
+              <button 
+                v-for="model in availableModels" 
+                :key="model"
+                @click="settings.refineModel = model" 
+                class="px-2 py-1 bg-slate-100 hover:bg-indigo-100 dark:bg-slate-800 dark:hover:bg-indigo-900/50 text-slate-600 dark:text-slate-300 text-[10px] rounded-md transition-colors font-medium border border-slate-200 dark:border-slate-700"
+              >
+                {{ model }}
+              </button>
             </div>
           </div>
 
@@ -324,10 +360,25 @@ onMounted(() => {
               placeholder="เช่น gemini-2.5-pro"
             />
             <div class="flex flex-wrap gap-2 mt-2 items-center">
-              <span class="text-[10px] text-slate-500 font-bold uppercase tracking-wider">แนะนำ:</span>
-              <button @click="settings.generateModel = 'gemini-2.5-pro'" class="px-2 py-1 bg-slate-100 hover:bg-blue-100 dark:bg-slate-800 dark:hover:bg-blue-900/50 text-slate-600 dark:text-slate-300 text-[10px] rounded-md transition-colors font-medium border border-slate-200 dark:border-slate-700">gemini-2.5-pro</button>
-              <button @click="settings.generateModel = 'gemini-2.5-flash'" class="px-2 py-1 bg-slate-100 hover:bg-blue-100 dark:bg-slate-800 dark:hover:bg-blue-900/50 text-slate-600 dark:text-slate-300 text-[10px] rounded-md transition-colors font-medium border border-slate-200 dark:border-slate-700">gemini-2.5-flash</button>
-              <button @click="settings.generateModel = 'gemini-3.1-flash-lite-preview'" class="px-2 py-1 bg-slate-100 hover:bg-blue-100 dark:bg-slate-800 dark:hover:bg-blue-900/50 text-slate-600 dark:text-slate-300 text-[10px] rounded-md transition-colors font-medium border border-slate-200 dark:border-slate-700">gemini-3.1-flash-lite-preview</button>
+              <span class="text-[10px] text-slate-500 font-bold uppercase tracking-wider">ตัวเลือก:</span>
+              <button 
+                v-if="availableModels.length === 0"
+                @click="fetchAvailableModels" 
+                :disabled="isFetchingModels"
+                class="px-3 py-1 bg-blue-50 hover:bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 text-[10px] rounded-md transition-colors font-bold flex items-center gap-1 border border-blue-200 dark:border-blue-800/50"
+              >
+                <RotateCcw v-if="isFetchingModels" class="w-3 h-3 animate-spin" />
+                <Database v-else class="w-3 h-3" />
+                ดึงรายชื่อโมเดลล่าสุด
+              </button>
+              <button 
+                v-for="model in availableModels" 
+                :key="model"
+                @click="settings.generateModel = model" 
+                class="px-2 py-1 bg-slate-100 hover:bg-blue-100 dark:bg-slate-800 dark:hover:bg-blue-900/50 text-slate-600 dark:text-slate-300 text-[10px] rounded-md transition-colors font-medium border border-slate-200 dark:border-slate-700"
+              >
+                {{ model }}
+              </button>
             </div>
           </div>
 
@@ -341,6 +392,40 @@ onMounted(() => {
               class="w-full min-h-[600px] bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 text-slate-900 dark:text-white font-medium text-xs leading-relaxed focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all resize-none custom-scrollbar shadow-sm"
               placeholder="ใส่ข้อมูล Schema และเงื่อนไขการสร้าง SQL..."
             ></textarea>
+          </div>
+          
+          <div class="pt-6 border-t border-slate-100 dark:border-slate-800 space-y-2">
+            <label class="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+              Optimize SQL Model <span class="text-rose-500">*สำหรับผู้บริหารและ DBA*</span>
+            </label>
+            <p class="text-[10px] text-slate-500 mb-2">โมเดลที่ใช้สำหรับปุ่ม Optimize SQL ในหน้าหลัก (แนะนำให้ใช้โมเดลรุ่น Pro เพื่อประสิทธิภาพสูงสุด)</p>
+            <input 
+              type="text"
+              v-model="settings.optimizeModel"
+              class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-3 text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all font-medium"
+              placeholder="เช่น gemini-3.1-pro"
+            />
+            <div class="flex flex-wrap gap-2 mt-2 items-center">
+              <span class="text-[10px] text-slate-500 font-bold uppercase tracking-wider">ตัวเลือก:</span>
+              <button 
+                v-if="availableModels.length === 0"
+                @click="fetchAvailableModels" 
+                :disabled="isFetchingModels"
+                class="px-3 py-1 bg-blue-50 hover:bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 text-[10px] rounded-md transition-colors font-bold flex items-center gap-1 border border-blue-200 dark:border-blue-800/50"
+              >
+                <RotateCcw v-if="isFetchingModels" class="w-3 h-3 animate-spin" />
+                <Database v-else class="w-3 h-3" />
+                ดึงรายชื่อโมเดลล่าสุด
+              </button>
+              <button 
+                v-for="model in availableModels" 
+                :key="'opt-'+model"
+                @click="settings.optimizeModel = model" 
+                class="px-2 py-1 bg-slate-100 hover:bg-blue-100 dark:bg-slate-800 dark:hover:bg-blue-900/50 text-slate-600 dark:text-slate-300 text-[10px] rounded-md transition-colors font-medium border border-slate-200 dark:border-slate-700"
+              >
+                {{ model }}
+              </button>
+            </div>
           </div>
         </div>
       </section>
@@ -378,10 +463,25 @@ onMounted(() => {
               placeholder="เช่น gemini-2.0-flash"
             />
             <div class="flex flex-wrap gap-2 mt-2 items-center">
-              <span class="text-[10px] text-slate-500 font-bold uppercase tracking-wider">แนะนำ:</span>
-              <button @click="settings.analyzeModel = 'gemini-2.5-flash'" class="px-2 py-1 bg-slate-100 hover:bg-violet-100 dark:bg-slate-800 dark:hover:bg-violet-900/50 text-slate-600 dark:text-slate-300 text-[10px] rounded-md transition-colors font-medium border border-slate-200 dark:border-slate-700">gemini-2.5-flash</button>
-              <button @click="settings.analyzeModel = 'gemini-3.1-flash-lite-preview'" class="px-2 py-1 bg-slate-100 hover:bg-violet-100 dark:bg-slate-800 dark:hover:bg-violet-900/50 text-slate-600 dark:text-slate-300 text-[10px] rounded-md transition-colors font-medium border border-slate-200 dark:border-slate-700">gemini-3.1-flash-lite-preview</button>
-              <button @click="settings.analyzeModel = 'gemini-2.5-pro'" class="px-2 py-1 bg-slate-100 hover:bg-violet-100 dark:bg-slate-800 dark:hover:bg-violet-900/50 text-slate-600 dark:text-slate-300 text-[10px] rounded-md transition-colors font-medium border border-slate-200 dark:border-slate-700">gemini-2.5-pro</button>
+              <span class="text-[10px] text-slate-500 font-bold uppercase tracking-wider">ตัวเลือก:</span>
+              <button 
+                v-if="availableModels.length === 0"
+                @click="fetchAvailableModels" 
+                :disabled="isFetchingModels"
+                class="px-3 py-1 bg-violet-50 hover:bg-violet-100 dark:bg-violet-900/30 text-violet-600 dark:text-violet-400 text-[10px] rounded-md transition-colors font-bold flex items-center gap-1 border border-violet-200 dark:border-violet-800/50"
+              >
+                <RotateCcw v-if="isFetchingModels" class="w-3 h-3 animate-spin" />
+                <Database v-else class="w-3 h-3" />
+                ดึงรายชื่อโมเดลล่าสุด
+              </button>
+              <button 
+                v-for="model in availableModels" 
+                :key="model"
+                @click="settings.analyzeModel = model" 
+                class="px-2 py-1 bg-slate-100 hover:bg-violet-100 dark:bg-slate-800 dark:hover:bg-violet-900/50 text-slate-600 dark:text-slate-300 text-[10px] rounded-md transition-colors font-medium border border-slate-200 dark:border-slate-700"
+              >
+                {{ model }}
+              </button>
             </div>
           </div>
 
@@ -432,10 +532,25 @@ onMounted(() => {
               placeholder="เช่น gemini-2.0-flash"
             />
             <div class="flex flex-wrap gap-2 mt-2 items-center">
-              <span class="text-[10px] text-slate-500 font-bold uppercase tracking-wider">แนะนำ:</span>
-              <button @click="settings.chatModel = 'gemini-2.5-flash'" class="px-2 py-1 bg-slate-100 hover:bg-teal-100 dark:bg-slate-800 dark:hover:bg-teal-900/50 text-slate-600 dark:text-slate-300 text-[10px] rounded-md transition-colors font-medium border border-slate-200 dark:border-slate-700">gemini-2.5-flash</button>
-              <button @click="settings.chatModel = 'gemini-3.1-flash-lite-preview'" class="px-2 py-1 bg-slate-100 hover:bg-teal-100 dark:bg-slate-800 dark:hover:bg-teal-900/50 text-slate-600 dark:text-slate-300 text-[10px] rounded-md transition-colors font-medium border border-slate-200 dark:border-slate-700">gemini-3.1-flash-lite-preview</button>
-              <button @click="settings.chatModel = 'gemini-2.5-pro'" class="px-2 py-1 bg-slate-100 hover:bg-teal-100 dark:bg-slate-800 dark:hover:bg-teal-900/50 text-slate-600 dark:text-slate-300 text-[10px] rounded-md transition-colors font-medium border border-slate-200 dark:border-slate-700">gemini-2.5-pro</button>
+              <span class="text-[10px] text-slate-500 font-bold uppercase tracking-wider">ตัวเลือก:</span>
+              <button 
+                v-if="availableModels.length === 0"
+                @click="fetchAvailableModels" 
+                :disabled="isFetchingModels"
+                class="px-3 py-1 bg-teal-50 hover:bg-teal-100 dark:bg-teal-900/30 text-teal-600 dark:text-teal-400 text-[10px] rounded-md transition-colors font-bold flex items-center gap-1 border border-teal-200 dark:border-teal-800/50"
+              >
+                <RotateCcw v-if="isFetchingModels" class="w-3 h-3 animate-spin" />
+                <Database v-else class="w-3 h-3" />
+                ดึงรายชื่อโมเดลล่าสุด
+              </button>
+              <button 
+                v-for="model in availableModels" 
+                :key="model"
+                @click="settings.chatModel = model" 
+                class="px-2 py-1 bg-slate-100 hover:bg-teal-100 dark:bg-slate-800 dark:hover:bg-teal-900/50 text-slate-600 dark:text-slate-300 text-[10px] rounded-md transition-colors font-medium border border-slate-200 dark:border-slate-700"
+              >
+                {{ model }}
+              </button>
             </div>
           </div>
 

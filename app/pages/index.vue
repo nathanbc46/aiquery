@@ -52,6 +52,11 @@ import * as XLSX from 'xlsx'
 
 const prompt = ref('')
 const isGenerating = ref(false)
+const isOptimizing = ref(false)
+const isOptimized = ref(false)
+const originalSql = ref<string | null>(null)
+const optimizationExplanation = ref<string | null>(null)
+const showOriginalSql = ref(false)
 const generatedResult = ref<any>(null)
 const isRequesting = ref(false)
 const isRequestModalOpen = ref(false)
@@ -82,6 +87,7 @@ const isExportingZoho = ref(false)
 const generatedZohoLink = ref('')
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
 const generateAbortController = ref<AbortController | null>(null)
+const previewAbortController = ref<AbortController | null>(null)
 const isCancelled = ref(false)
 const useHybridSchema = ref(false)
 const isDebugMode = ref(false)
@@ -869,20 +875,24 @@ const triggerFileUpload = () => {
   fileInputRef.value?.click()
 }
 
-const renderedExplanation = computed(() => {
-  if (!generatedResult.value?.explanation) return ''
-  let text = generatedResult.value.explanation
+const formatExplanation = (text: string | null | undefined) => {
+  if (!text) return ''
+  let processedText = text
   
   // Auto-convert legacy history items or plain text to bullet points
-  if (!text.includes('- ') && !text.includes('* ')) {
-    text = text.split('\n')
+  if (!processedText.includes('- ') && !processedText.includes('* ')) {
+    processedText = processedText.split('\n')
       .map((line: string) => line.trim())
       .filter((line: string) => line.length > 0)
       .map((line: string) => `- ${line}`)
       .join('\n')
   }
   
-  return DOMPurify.sanitize(marked.parse(text) as string)
+  return DOMPurify.sanitize(marked.parse(processedText) as string)
+}
+
+const renderedExplanation = computed(() => {
+  return formatExplanation(generatedResult.value?.explanation)
 })
 
 const isExplanationCopied = ref(false)
@@ -1081,6 +1091,10 @@ const generateSql = async (isDraft = false) => {
   
   isGenerating.value = true
   isCancelled.value = false
+  isOptimized.value = false
+  originalSql.value = null
+  optimizationExplanation.value = null
+  showOriginalSql.value = false
   generatedResult.value = null // Clear old result immediately
   error.value = null
   showPreview.value = false
@@ -1135,10 +1149,56 @@ const generateSql = async (isDraft = false) => {
   }
 }
 
+const optimizeSql = async () => {
+  if (!generatedResult.value?.sql || isOptimizing.value) return
+  
+  isOptimizing.value = true
+  try {
+    const response = await $fetch<any>('/api/ai-query/optimize', {
+      method: 'POST',
+      body: { 
+        sql: generatedResult.value.sql,
+        explanation: generatedResult.value.explanation
+      }
+    })
+    
+    if (response.success) {
+      originalSql.value = generatedResult.value.sql
+      generatedResult.value.sql = response.optimizedSql
+      if (response.optimizationExplanation) {
+        optimizationExplanation.value = response.optimizationExplanation
+      }
+      if (response.modelUsed) {
+        generatedResult.value.optimizeModelUsed = response.modelUsed
+      }
+      isOptimized.value = true
+      toast.success('ปรับปรุงสำเร็จ', 'AI ได้ปรับปรุง SQL ให้ทำงานได้เร็วขึ้นแล้ว')
+    } else {
+      toast.error('ไม่สามารถปรับปรุงได้', response.error || 'เกิดข้อผิดพลาดในการปรับปรุง SQL')
+    }
+  } catch (e: any) {
+    console.error(e)
+    toast.error('เกิดข้อผิดพลาด', 'ไม่สามารถเชื่อมต่อกับ AI ได้ในขณะนี้')
+  } finally {
+    isOptimizing.value = false
+  }
+}
+
 const cancelGenerate = () => {
   if (generateAbortController.value) {
     generateAbortController.value.abort()
     isCancelled.value = true
+  }
+}
+
+const revertToOriginalSql = () => {
+  if (originalSql.value && generatedResult.value) {
+    generatedResult.value.sql = originalSql.value
+    isOptimized.value = false
+    optimizationExplanation.value = null
+    originalSql.value = null
+    showOriginalSql.value = false
+    toast.info('คืนค่าเดิม', 'กลับไปใช้คำสั่ง SQL เดิมก่อนการปรับปรุงแล้ว')
   }
 }
 
@@ -1287,13 +1347,25 @@ const updateSql = async () => {
 }
 
 const runDraftQuery = async () => {
-  if (!generatedResult.value?.sql || isUpdatingSql.value) return
+  if (!generatedResult.value?.sql) return
+  
+  if (isUpdatingSql.value) {
+    if (previewAbortController.value) {
+      previewAbortController.value.abort()
+      isUpdatingSql.value = false
+      toast.info('ยกเลิกแล้ว', 'ยกเลิกการดึงข้อมูลตามที่คุณขอแล้ว')
+    }
+    return
+  }
   
   isUpdatingSql.value = true
+  previewAbortController.value = new AbortController()
+  
   try {
     const response = await $fetch<any>('/api/ai-query/preview', {
       method: 'POST',
-      body: { query: generatedResult.value.sql }
+      body: { query: generatedResult.value.sql },
+      signal: previewAbortController.value.signal
     })
     
     if (response.success) {
@@ -1313,10 +1385,12 @@ const runDraftQuery = async () => {
       generatedResult.value.dbError = response.error
     }
   } catch (e: any) {
+    if (e.name === 'AbortError') return
     generatedResult.value.status = 'error'
     generatedResult.value.dbError = e?.data?.message || e?.message || 'Database execution failed'
   } finally {
     isUpdatingSql.value = false
+    previewAbortController.value = null
   }
 }
 
@@ -1758,9 +1832,14 @@ const highlightSql = (sqlStr: string) => {
           <div class="flex flex-col md:flex-row divide-y md:divide-y-0 md:divide-x divide-slate-200 dark:divide-slate-800 border-b border-slate-200 dark:border-slate-800">
             <div class="flex-1 p-8 bg-slate-50/30 dark:bg-slate-900/20 relative group/summary">
               <div class="flex items-center justify-between mb-3">
-                <div class="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.3em] text-slate-500 dark:text-slate-400">
-                  <Wand2 class="w-4 h-4" />
-                  AI Analysis Summary
+                <div class="flex items-center gap-3">
+                  <div class="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.3em] text-slate-500 dark:text-slate-400">
+                    <Wand2 class="w-4 h-4" />
+                    AI Analysis Summary
+                  </div>
+                  <span v-if="generatedResult.modelUsed" class="px-2 py-0.5 bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-md text-[8px] font-mono border border-slate-300 dark:border-slate-700">
+                    {{ generatedResult.modelUsed }}
+                  </span>
                 </div>
                 <div class="flex items-center gap-2">
                   <button 
@@ -1783,6 +1862,22 @@ const highlightSql = (sqlStr: string) => {
                 </div>
               </div>
               <div class="text-slate-700 dark:text-slate-200 leading-relaxed text-sm font-medium prose prose-slate dark:prose-invert prose-p:my-2 prose-ul:my-2 prose-li:my-1 max-w-none prose-markdown" v-html="renderedExplanation"></div>
+
+              <!-- Optimization Explanation -->
+              <div v-if="isOptimized && optimizationExplanation" class="mt-6 p-5 rounded-2xl bg-indigo-50/50 dark:bg-indigo-900/10 border border-indigo-100 dark:border-indigo-800/30">
+                <div class="flex items-center gap-2 mb-3">
+                  <h4 class="text-xs font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-widest flex items-center gap-2">
+                    <Sparkles class="w-4 h-4" />
+                    การปรับปรุงประสิทธิภาพโดย AI (Auto-Optimized):
+                  </h4>
+                  <span v-if="generatedResult.optimizeModelUsed" class="px-2 py-0.5 bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-400 rounded-md text-[8px] font-mono border border-indigo-200 dark:border-indigo-800">
+                    {{ generatedResult.optimizeModelUsed }}
+                  </span>
+                </div>
+                <div class="prose prose-indigo dark:prose-invert prose-sm max-w-none text-indigo-900 dark:text-indigo-200 prose-markdown">
+                  <div v-html="formatExplanation(optimizationExplanation)"></div>
+                </div>
+              </div>
             </div>
             
             <div class="md:w-56 p-8 bg-slate-50/50 dark:bg-slate-950/50 flex flex-col justify-center items-center text-center">
@@ -1809,7 +1904,32 @@ const highlightSql = (sqlStr: string) => {
                 <div class="space-y-1 flex-1">
                   <h5 class="text-sm font-black uppercase tracking-wider">ตรวจสอบและรันคำสั่ง SQL</h5>
                   <p class="text-xs font-medium leading-relaxed opacity-80">AI ได้สร้างคำสั่ง SQL ดราฟต์ไว้ให้แล้ว คุณสามารถตรวจสอบหรือแก้ไขก่อนรันจริง:</p>
-                  <div class="mt-4 p-6 bg-slate-50 dark:bg-slate-950 rounded-3xl font-mono text-[11px] overflow-x-auto border border-blue-100 dark:border-blue-900/30 shadow-inner group/draftsql relative">
+                  
+                  <div v-if="isOptimized" class="mt-4 grid grid-cols-1 xl:grid-cols-2 gap-4">
+                    <!-- Original SQL -->
+                    <div class="p-5 bg-slate-50 dark:bg-slate-950 rounded-3xl font-mono text-[11px] overflow-x-auto border border-slate-200 dark:border-slate-800 shadow-inner group/origsql relative opacity-70">
+                      <div class="mb-3 text-[9px] font-black uppercase text-slate-500 dark:text-slate-400 tracking-[0.2em] flex justify-between items-center">
+                        <span>Original SQL:</span>
+                        <button @click="revertToOriginalSql" class="text-[9px] font-bold text-amber-600 hover:text-amber-700 bg-amber-50 px-2 py-1 rounded-lg border border-amber-200 flex items-center gap-1 transition-colors">
+                          <RotateCcw class="w-3 h-3"/> กลับไปใช้คำสั่งเดิม
+                        </button>
+                      </div>
+                      <pre class="whitespace-pre-wrap leading-relaxed text-slate-600 dark:text-slate-400"><code class="sql-highlight" v-html="highlightSql(originalSql || '')"></code></pre>
+                    </div>
+
+                    <!-- Optimized SQL -->
+                    <div class="p-5 bg-white dark:bg-slate-900 rounded-3xl font-mono text-[11px] overflow-x-auto border-2 border-indigo-200 dark:border-indigo-800 shadow-sm group/optsql relative">
+                      <div class="mb-3 text-[9px] font-black uppercase text-indigo-500 dark:text-indigo-400 tracking-[0.2em] flex justify-between items-center">
+                        <span class="flex items-center gap-1"><Sparkles class="w-3 h-3"/> Optimized SQL (ใช้อยู่):</span>
+                        <button @click="copySql" class="hover:text-indigo-600 dark:hover:text-indigo-300 transition-colors p-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-900/30">
+                          <Copy class="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                      <pre class="whitespace-pre-wrap leading-relaxed text-slate-800 dark:text-indigo-100"><code class="sql-highlight" v-html="highlightSql(generatedResult.sql)"></code></pre>
+                    </div>
+                  </div>
+                  
+                  <div v-else class="mt-4 p-6 bg-slate-50 dark:bg-slate-950 rounded-3xl font-mono text-[11px] overflow-x-auto border border-blue-100 dark:border-blue-900/30 shadow-inner group/draftsql relative">
                     <div class="mb-3 text-[9px] font-black uppercase text-blue-500/50 dark:text-blue-400/30 tracking-[0.2em] flex justify-between items-center">
                       <span>Draft SQL:</span>
                       <button @click="copySql" class="hover:text-blue-600 dark:hover:text-blue-300 transition-colors p-1.5 rounded-lg bg-blue-100/50 dark:bg-white/5">
@@ -1823,6 +1943,16 @@ const highlightSql = (sqlStr: string) => {
               
               <div class="flex flex-col sm:flex-row items-center justify-end gap-4">
                 <button 
+                  @click="optimizeSql"
+                  :disabled="isOptimizing"
+                  class="w-full sm:w-auto px-8 py-4 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 text-xs font-black rounded-2xl border border-indigo-200 dark:border-indigo-800/50 hover:bg-indigo-600 hover:text-white transition-all flex items-center justify-center gap-2 active:scale-95 uppercase tracking-widest disabled:opacity-50"
+                  title="ให้ AI ช่วยปรับปรุง SQL ให้เร็วและมีประสิทธิภาพมากขึ้น"
+                >
+                  <Sparkles v-if="!isOptimizing" class="w-4 h-4" />
+                  <Loader2 v-else class="w-4 h-4 animate-spin" />
+                  Optimize SQL
+                </button>
+                <button 
                   @click="openManualSqlEditor"
                   class="w-full sm:w-auto px-8 py-4 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs font-black rounded-2xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 transition-all flex items-center justify-center gap-2 active:scale-95 uppercase tracking-widest"
                 >
@@ -1831,12 +1961,17 @@ const highlightSql = (sqlStr: string) => {
                 </button>
                 <button 
                   @click="runDraftQuery"
-                  :disabled="isUpdatingSql"
-                  class="w-full sm:w-auto px-12 py-4 bg-blue-600 hover:bg-blue-700 text-white text-sm font-black rounded-2xl shadow-xl shadow-blue-500/20 transition-all flex items-center justify-center gap-2 active:scale-95 uppercase tracking-widest"
+                  class="w-full sm:w-auto px-12 py-4 text-white text-sm font-black rounded-2xl shadow-xl transition-all flex items-center justify-center gap-2 active:scale-95 uppercase tracking-widest"
+                  :class="isUpdatingSql ? 'bg-rose-600 hover:bg-rose-700 shadow-rose-500/20' : 'bg-blue-600 hover:bg-blue-700 shadow-blue-500/20'"
                 >
-                  <Loader2 v-if="isUpdatingSql" class="w-5 h-5 animate-spin" />
-                  <Database v-else class="w-5 h-5" />
-                  {{ isUpdatingSql ? 'กำลังดึงข้อมูล...' : 'รัน Query ทันที' }}
+                  <template v-if="isUpdatingSql">
+                    <Loader2 class="w-5 h-5 animate-spin" />
+                    <span class="flex items-center gap-2">กำลังดึงข้อมูล... <span class="text-rose-200 text-xs ml-1">(คลิกเพื่อหยุด)</span></span>
+                  </template>
+                  <template v-else>
+                    <Database class="w-5 h-5" />
+                    รัน Query ทันที
+                  </template>
                 </button>
               </div>
             </div>
@@ -2006,6 +2141,7 @@ const highlightSql = (sqlStr: string) => {
                   <Edit3 class="w-3.5 h-3.5" />
                   ปรับปรุงคำถาม
                 </button>
+
                 <button 
                   @click="isFavoriteModalOpen = true"
                   class="px-5 py-3.5 bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 hover:bg-amber-500 hover:text-white transition-all border border-amber-200 dark:border-amber-800/50 text-xs font-black rounded-2xl flex items-center justify-center gap-2 active:scale-95 uppercase tracking-widest whitespace-nowrap"

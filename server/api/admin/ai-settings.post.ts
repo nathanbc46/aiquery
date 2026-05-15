@@ -15,6 +15,7 @@ export default defineEventHandler(async (event) => {
     analyzeSystemInstruction,
     chatModel,
     chatSystemInstruction,
+    optimizeModel,
     maxResultsLimit,
     useHybridSchema,
     isDebugMode
@@ -36,6 +37,7 @@ export default defineEventHandler(async (event) => {
           analyzeSystemInstruction,
           chatModel,
           chatSystemInstruction,
+          optimizeModel,
           maxResultsLimit,
           useHybridSchema,
           isDebugMode
@@ -53,6 +55,7 @@ export default defineEventHandler(async (event) => {
         analyzeSystemInstruction,
         chatModel,
         chatSystemInstruction,
+        optimizeModel,
         maxResultsLimit,
         useHybridSchema,
         isDebugMode

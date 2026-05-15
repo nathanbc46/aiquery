@@ -54,14 +54,25 @@ export default defineEventHandler(async (event) => {
     const settingsList = await db.select().from(aiSettings).where(eq(aiSettings.id, 'global')).limit(1);
     const maxResultsLimit = settingsList[0]?.maxResultsLimit || DEFAULT_MAX_RESULTS_LIMIT;
 
-    // 2. รัน COUNT(*) เพื่อดูจำนวนรายการทั้งหมด
-    const countSql = `SELECT COUNT(*) as total FROM (${cleanSql}) as subq`;
-    const [countRes]: any = await db.execute(sql.raw(countSql));
-    const totalCount = countRes[0]?.total || 0;
+    // ตั้งเวลา Timeout สำหรับ SQL นี้ (ป้องกันค้าง) - 15 วินาที
+    await db.execute(sql.raw('SET SESSION MAX_EXECUTION_TIME = 15000'));
 
-    // 3. รันตัวอย่างข้อมูล 10 แถว
-    const results = await db.execute(sql.raw(previewSql))
-    const dataRows = Array.isArray(results[0]) ? results[0] : results
+    let totalCount = 0;
+    let dataRows = [];
+
+    try {
+      // 2. รัน COUNT(*) เพื่อดูจำนวนรายการทั้งหมด
+      const countSql = `SELECT COUNT(*) as total FROM (${cleanSql}) as subq`;
+      const [countRes]: any = await db.execute(sql.raw(countSql));
+      totalCount = countRes[0]?.total || 0;
+
+      // 3. รันตัวอย่างข้อมูล 10 หรือ 50 แถว
+      const results = await db.execute(sql.raw(previewSql))
+      dataRows = Array.isArray(results[0]) ? results[0] : results
+    } finally {
+      // รีเซ็ตค่ากลับเป็น Default เพื่อไม่ให้กระทบ Connection อื่นใน Pool
+      await db.execute(sql.raw('SET SESSION MAX_EXECUTION_TIME = 0'));
+    }
 
     return {
       success: true,

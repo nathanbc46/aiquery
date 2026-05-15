@@ -10,7 +10,8 @@ import {
   DEFAULT_CHAT_INSTRUCTION,
   DEFAULT_REFINE_MODEL,
   DEFAULT_REFINE_INSTRUCTION,
-  DEFAULT_GENERATE_MODEL
+  DEFAULT_GENERATE_MODEL,
+  DEFAULT_OPTIMIZE_MODEL
 } from '../../utils/constants';
 
 export default defineEventHandler(async (event) => {
@@ -35,6 +36,7 @@ export default defineEventHandler(async (event) => {
       analyzeSystemInstruction: DEFAULT_ANALYZE_INSTRUCTION,
       chatModel: DEFAULT_CHAT_MODEL,
       chatSystemInstruction: DEFAULT_CHAT_INSTRUCTION,
+      optimizeModel: DEFAULT_OPTIMIZE_MODEL,
       maxResultsLimit: DEFAULT_MAX_RESULTS_LIMIT
     };
 

@@ -13,20 +13,21 @@ export const VALID_ROLES = "'Organisation','(Mi) Manager Team A (No Pipe)','Subs
 export const VALID_SALES_STAGES = "'S : Suspect','C : Candidate Prospect','B : Promoter Prospect','A : Power Promoter','A Plus : Power Promoter Plus','Closed Won','Closed Lost','Closed Opp'";
 export const VALID_ACCOUNT_TYPES = "'Analyst','Blacklist','Competitor','Customer','Integrator','Investor','Other','Partner','Press','Prospect','Reseller'";
 
-export const DEFAULT_ANALYZE_MODEL = 'gemini-3.1-flash-lite-preview';
+export const DEFAULT_ANALYZE_MODEL = 'gemini-3.1-flash-lite';
 export const DEFAULT_ANALYZE_INSTRUCTION = `คุณคือ AI นักวิเคราะห์ข้อมูล CRM ที่เชี่ยวชาญ
 ตอบเป็นภาษาไทยเสมอ ใช้ภาษาที่อ่านง่าย เข้าใจได้โดยไม่ต้องมีความรู้ด้าน IT
 สรุปข้อมูลให้เป็นประโยชน์ต่อธุรกิจ ระบุ Insight ที่น่าสนใจ และข้อสังเกตที่สำคัญ
 ตอบในรูปแบบที่มีโครงสร้างชัดเจน ใช้ bullet point หรือหัวข้อย่อย`;
 
-export const DEFAULT_CHAT_MODEL = 'gemini-3.1-flash-lite-preview';
+export const DEFAULT_CHAT_MODEL = 'gemini-3.1-flash-lite';
 export const DEFAULT_CHAT_INSTRUCTION = `คุณคือ AI นักวิเคราะห์ข้อมูล CRM ที่เชี่ยวชาญ ชื่อ "DataBot"
 ตอบเป็นภาษาไทยเสมอ ใช้ภาษาที่อ่านง่ายและเป็นกันเอง
 คุณมีข้อมูลชุดหนึ่งที่ user ถามมา และสามารถวิเคราะห์ ตอบคำถาม และให้ insight ได้
 ถ้าถามนอกเหนือจากข้อมูลที่มี ให้บอกอย่างสุภาพว่าไม่มีข้อมูลนั้น
 ห้ามสร้างข้อมูลขึ้นมาเอง ตอบจากข้อมูลที่ได้รับเท่านั้น`;
 
-export const DEFAULT_REFINE_MODEL = 'gemini-3.1-flash-lite-preview';
+export const DEFAULT_REFINE_MODEL = 'gemini-3.1-flash-lite';
+export const DEFAULT_OPTIMIZE_MODEL = 'gemini-2.5-pro';
 export const DEFAULT_REFINE_INSTRUCTION = `คุณคือผู้เชี่ยวชาญด้านการเขียน Prompt สำหรับระบบ Text-to-SQL (Vtiger CRM).
 หน้าที่ของคุณคือรับ "คำถามภาษาไทย" จากผู้ใช้ และปรับปรุงให้เป็นประโยคที่ชัดเจนขึ้น เพื่อให้ AI ตัวอื่นนำไปสร้าง SQL ได้ถูกต้องที่สุด.
 
@@ -36,7 +37,7 @@ export const DEFAULT_REFINE_INSTRUCTION = `คุณคือผู้เชี�
 3. ใช้ภาษาไทยที่สุภาพและเป็นมืออาชีพ.
 4. ตอบกลับเฉพาะ "ประโยคที่ปรับปรุงแล้วเท่านั้น" ไม่ต้องมีคำอธิบายอื่น.`;
 
-export const DEFAULT_GENERATE_MODEL = 'gemini-3.1-flash-lite-preview';
+export const DEFAULT_GENERATE_MODEL = 'gemini-3.1-flash-lite';
 export const DEFAULT_GENERATE_INSTRUCTION = `
 You are an expert SQL generator for Vtiger CRM (MySQL).
 The database contains the following key tables and columns. 

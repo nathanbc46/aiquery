@@ -127,6 +127,8 @@ export default defineEventHandler(async (event) => {
       };
     }
 
+
+
     // Basic Security Check (Guardrail)
     const sqlUpper = jsonResult.sql.toUpperCase();
     const forbiddenKeywords = ['UPDATE', 'DELETE', 'DROP', 'TRUNCATE', 'ALTER', 'INSERT', 'EXEC'];
@@ -203,7 +205,8 @@ export default defineEventHandler(async (event) => {
       previewData: previewData,
       dbError: dbError,
       limitOverridden: limitOverridden,
-      debug: debugInfo
+      debug: debugInfo,
+      modelUsed: modelName
     };
 
 
