@@ -1361,8 +1361,7 @@ onUnmounted(() => {
                 <!-- Logic Explanation -->
                 <div v-if="activeSqlExplanation" class="space-y-3">
                   <p class="text-xs font-black text-slate-400 dark:text-slate-500 uppercase tracking-[0.2em]">Logic Explanation</p>
-                  <div class="p-6 bg-indigo-50/30 dark:bg-indigo-900/10 rounded-2xl border border-indigo-100/50 dark:border-indigo-900/30 text-slate-700 dark:text-slate-300 text-sm leading-relaxed font-medium">
-                    {{ activeSqlExplanation }}
+                  <div class="p-6 bg-indigo-50/30 dark:bg-indigo-900/10 rounded-2xl border border-indigo-100/50 dark:border-indigo-900/30 text-slate-700 dark:text-slate-300 text-sm leading-relaxed font-medium" v-html="renderMarkdown(activeSqlExplanation || '')">
                   </div>
                 </div>
               </div>
