@@ -118,6 +118,7 @@ const favoriteTitle = ref('')
 // CSV download confirmation modal
 const isCsvConfirmModalOpen = ref(false)
 const csvFilename = ref('')
+const csvExpiresAt = ref('')
 const csvSuccessDone = ref(false)
 
 // Zoho success state
@@ -594,6 +595,10 @@ const sendChatMessage = async () => {
 const openCsvModal = () => {
   const today = new Date().toISOString().slice(0, 10).replace(/-/g, '')
   csvFilename.value = `AI_Export_${today}`
+  // default expired = 7 วันจากวันนี้
+  const defaultExpiry = new Date()
+  defaultExpiry.setDate(defaultExpiry.getDate() + 7)
+  csvExpiresAt.value = defaultExpiry.toISOString().slice(0, 10)
   fetchVtigerUsers().then(() => {
     if (!csvOwnerVtigerId.value && user.value?.vtigerId) {
       csvOwnerVtigerId.value = user.value.vtigerId
@@ -1215,6 +1220,8 @@ const requestApproval = async (skipDownload: boolean = false) => {
         explanation: generatedResult.value.explanation,
         resultCount: generatedResult.value.previewCount,
         requestReason: requestReason.value,
+        ownerVtigerId: csvOwnerVtigerId.value || null,
+        expiresAt: csvExpiresAt.value ? new Date(csvExpiresAt.value + 'T23:59:59').toISOString() : null,
       }
     })
     
@@ -2735,6 +2742,17 @@ const highlightSql = (sqlStr: string) => {
                       </li>
                     </ul>
                   </div>
+                </div>
+
+                <!-- Expiry Date -->
+                <div>
+                  <label class="text-xs font-bold text-slate-500 dark:text-white/40 uppercase tracking-widest mb-2 block">วันหมดอายุ (Expires At)</label>
+                  <input
+                    v-model="csvExpiresAt"
+                    type="date"
+                    class="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl px-4 py-3 text-sm text-slate-900 dark:text-white outline-none focus:border-emerald-500/50 transition-all"
+                  />
+                  <p class="text-[11px] text-slate-400 dark:text-white/30 mt-1.5">ไฟล์จะดาวน์โหลดได้ถึงวันที่นี้</p>
                 </div>
 
                 <!-- Info Box -->

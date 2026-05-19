@@ -1,12 +1,13 @@
 import { useDb } from '../../utils/db';
 import { aiQueryRequests, users } from '../../utils/schema';
 import { getAuthSession } from '../../utils/auth';
+import { findOrCreateAiUser } from '../../utils/auth';
 import { sendEmail } from '../../utils/mail';
 import { or, eq } from 'drizzle-orm';
 
 export default defineEventHandler(async (event) => {
   const body = await readBody(event);
-  const { queryText, generatedSql, explanation, resultCount, requestReason } = body;
+  const { queryText, generatedSql, explanation, resultCount, requestReason, ownerVtigerId, expiresAt } = body;
 
   if (!queryText || !generatedSql) {
     throw createError({ statusCode: 400, statusMessage: 'Missing required fields' });
@@ -39,6 +40,11 @@ export default defineEventHandler(async (event) => {
     if (isAdminOrManager) {
       // 3A. อนุมัติอัตโนมัติทันทีสำหรับ Manager/Admin (โดยเรียกใช้งาน API Action)
       try {
+        // ใช้ expiresAt ที่ user เลือก หรือ default 7 วัน
+        const resolvedExpiresAt = expiresAt
+          ? new Date(expiresAt).toISOString()
+          : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+
         await $fetch('/api/ai-query/action', {
           method: 'POST',
           headers: {
@@ -48,10 +54,23 @@ export default defineEventHandler(async (event) => {
             requestId,
             status: 'APPROVED',
             managerComment: '✨ อนุมัติอัตโนมัติโดยระบบ (ผู้ขอมีสิทธิ์ Manager/Admin)',
-            expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString() // ให้เวลา 7 วัน
+            expiresAt: resolvedExpiresAt
           }
         });
-        
+
+        // อัพเดท userId (owner) ถ้า user เลือก owner ที่ต่างจากตัวเอง
+        if (ownerVtigerId) {
+          try {
+            const db = await useDb();
+            const ownerAiUserId = await findOrCreateAiUser(ownerVtigerId);
+            await db.update(aiQueryRequests)
+              .set({ userId: ownerAiUserId })
+              .where(eq(aiQueryRequests.id, requestId));
+          } catch (err) {
+            console.error('Update owner failed:', err);
+          }
+        }
+
         return { success: true, requestId, autoApproved: true };
       } catch (err) {
         console.error('Auto-approval failed:', err);

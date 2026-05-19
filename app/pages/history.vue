@@ -112,11 +112,32 @@ const copyToClipboard = (text: string) => {
 // Get User Role for Admin/Manager features
 const { data: authData } = await useFetch<any>('/api/auth/me')
 const user = computed(() => authData.value?.user || null)
+const isAdmin = computed(() => user.value?.role === 'admin')
 
 // SQL Expand Modal (for Admin/Manager)
 const isSqlModalOpen = ref(false)
 const activeSql = ref('')
 const activeSqlExplanation = ref('')
+
+// ─── Delete State ────────────────────────────────────────────
+const deleteConfirmId = ref<string | null>(null)
+const isDeleting = ref(false)
+
+const confirmDelete = async () => {
+  if (!deleteConfirmId.value) return
+  isDeleting.value = true
+  try {
+    await $fetch(`/api/ai-query/${deleteConfirmId.value}`, { method: 'DELETE' })
+    requests.value = requests.value.filter(r => r.id !== deleteConfirmId.value)
+    pagination.value.total = Math.max(0, pagination.value.total - 1)
+    toast.success('ลบสำเร็จ', 'ลบรายการและไฟล์ CSV เรียบร้อยแล้ว')
+  } catch (e: any) {
+    toast.error('ลบไม่สำเร็จ', e?.data?.statusMessage || 'ไม่สามารถลบรายการได้')
+  } finally {
+    isDeleting.value = false
+    deleteConfirmId.value = null
+  }
+}
 
 // ─── Renewal State ──────────────────────────────────────────
 const renewRequestId = ref<string | null>(null)
@@ -858,11 +879,21 @@ onUnmounted(() => {
                 {{ req.time }}
               </div>
             </div>
-            <div class="px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-widest border flex items-center gap-1.5" :class="getStatusClass(req.status)">
-              <CheckCircle v-if="req.status === 'APPROVED'" class="w-3 h-3" />
-              <XCircle v-else-if="req.status === 'REJECTED'" class="w-3 h-3" />
-              <Clock v-else class="w-3 h-3" />
-              {{ getStatusLabel(req.status) }}
+            <div class="flex items-center gap-2">
+              <div class="px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-widest border flex items-center gap-1.5" :class="getStatusClass(req.status)">
+                <CheckCircle v-if="req.status === 'APPROVED'" class="w-3 h-3" />
+                <XCircle v-else-if="req.status === 'REJECTED'" class="w-3 h-3" />
+                <Clock v-else class="w-3 h-3" />
+                {{ getStatusLabel(req.status) }}
+              </div>
+              <button
+                v-if="isAdmin"
+                @click="deleteConfirmId = req.id"
+                class="w-7 h-7 rounded-lg bg-rose-50 dark:bg-rose-900/20 hover:bg-rose-100 dark:hover:bg-rose-900/40 text-rose-400 hover:text-rose-600 flex items-center justify-center transition-all shrink-0"
+                title="ลบรายการนี้"
+              >
+                <Trash2 class="w-3.5 h-3.5" />
+              </button>
             </div>
           </div>
 
@@ -1511,9 +1542,61 @@ onUnmounted(() => {
       </transition>
     </Teleport>
   </ClientOnly>
+
+  <!-- Delete Confirm Modal -->
+  <ClientOnly>
+    <Teleport to="body">
+      <transition name="modal">
+        <div v-if="deleteConfirmId" class="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-slate-900/80 backdrop-blur-md">
+          <div class="bg-white dark:bg-slate-900 rounded-[2.5rem] shadow-2xl w-full max-w-sm overflow-hidden border border-slate-200 dark:border-slate-800 animate-in zoom-in-95 duration-300" @click.stop>
+            <div class="p-8 text-center space-y-6">
+              <div class="w-20 h-20 bg-rose-50 dark:bg-rose-900/20 rounded-full flex items-center justify-center text-rose-500 mx-auto border border-rose-100 dark:border-rose-800/50">
+                <Trash2 class="w-10 h-10" />
+              </div>
+              <div class="space-y-2">
+                <h3 class="text-xl font-black text-slate-900 dark:text-white">ยืนยันการลบ?</h3>
+                <p class="text-sm text-slate-500 dark:text-slate-400 font-medium">รายการและไฟล์ CSV จะถูกลบถาวร<br>ไม่สามารถกู้คืนได้</p>
+              </div>
+              <div class="flex gap-3 pt-2">
+                <button
+                  @click="deleteConfirmId = null"
+                  :disabled="isDeleting"
+                  class="flex-1 px-6 py-3.5 text-sm font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-2xl transition-all border border-slate-200 dark:border-slate-700"
+                >
+                  ยกเลิก
+                </button>
+                <button
+                  @click="confirmDelete"
+                  :disabled="isDeleting"
+                  class="flex-1 px-6 py-3.5 bg-rose-600 hover:bg-rose-700 disabled:opacity-60 text-white text-sm font-black rounded-2xl transition-all shadow-lg shadow-rose-500/25 flex items-center justify-center gap-2"
+                >
+                  <RotateCcw v-if="isDeleting" class="w-4 h-4 animate-spin" />
+                  <Trash2 v-else class="w-4 h-4" />
+                  ลบถาวร
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </transition>
+    </Teleport>
+  </ClientOnly>
 </template>
 
 <style scoped>
+.modal-enter-active, .modal-leave-active {
+  transition: opacity 0.25s ease;
+}
+.modal-enter-from, .modal-leave-to {
+  opacity: 0;
+}
+.modal-enter-active > div, .modal-leave-active > div {
+  transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.modal-enter-from > div, .modal-leave-to > div {
+  transform: scale(0.92);
+}
+
 @keyframes bounce {
   0%, 100% { transform: translateY(0); }
   50% { transform: translateY(-3px); }
