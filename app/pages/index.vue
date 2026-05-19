@@ -123,6 +123,7 @@ const csvSuccessDone = ref(false)
 
 // Zoho success state
 const zohoSuccessDone = ref(false)
+const zohoExpiresAt = ref('')
 
 // AI Chat (Admin) state
 const isChatModalOpen = ref(false)
@@ -609,6 +610,9 @@ const openCsvModal = () => {
 }
 
 const openZohoModal = () => {
+  const defaultExpiry = new Date()
+  defaultExpiry.setDate(defaultExpiry.getDate() + 7)
+  zohoExpiresAt.value = defaultExpiry.toISOString().slice(0, 10)
   fetchVtigerUsers().then(() => {
     if (!zohoOwnerVtigerId.value && user.value?.vtigerId) {
       zohoOwnerVtigerId.value = user.value.vtigerId
@@ -944,6 +948,9 @@ const handleZohoExport = async () => {
     }
 
     // 1. Create request + auto-approve (same as CSV flow)
+    const zohoResolvedExpiry = zohoExpiresAt.value
+      ? new Date(zohoExpiresAt.value + 'T23:59:59').toISOString()
+      : null
     const requestResp = await $fetch<any>('/api/ai-query/request', {
       method: 'POST',
       body: {
@@ -952,6 +959,8 @@ const handleZohoExport = async () => {
         explanation: generatedResult.value.explanation,
         resultCount: generatedResult.value.previewCount,
         requestReason: 'Export to Zoho WorkDrive',
+        ownerVtigerId: zohoOwnerVtigerId.value || null,
+        expiresAt: zohoResolvedExpiry,
       }
     })
 
@@ -965,7 +974,7 @@ const handleZohoExport = async () => {
       method: 'POST',
       body: {
         sql: generatedResult.value.sql,
-        options: { ...zohoOptions.value, ownerVtigerId: zohoOwnerVtigerId.value },
+        options: { ...zohoOptions.value, ownerVtigerId: zohoOwnerVtigerId.value, expiresAt: zohoResolvedExpiry },
         requestId: requestResp.requestId
       }
     })
@@ -2549,6 +2558,17 @@ const highlightSql = (sqlStr: string) => {
                       </li>
                     </ul>
                   </div>
+                </div>
+
+                <!-- วันหมดอายุ -->
+                <div>
+                  <label class="text-xs font-bold text-slate-500 dark:text-white/40 uppercase tracking-widest mb-2 block">วันหมดอายุลิงก์</label>
+                  <input
+                    v-model="zohoExpiresAt"
+                    type="date"
+                    class="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl px-4 py-3 text-sm text-slate-900 dark:text-white outline-none focus:border-emerald-500/50 transition-all"
+                  />
+                  <p class="text-[11px] text-slate-400 dark:text-white/30 mt-1.5">ลิงก์จะหมดอายุหลังจากวันที่กำหนด (ว่างไว้ = ไม่มีวันหมดอายุ)</p>
                 </div>
 
                 <!-- Info Box -->

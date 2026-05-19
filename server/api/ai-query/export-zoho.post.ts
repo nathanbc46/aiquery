@@ -3,7 +3,8 @@ import { sql } from 'drizzle-orm';
 import { eq } from 'drizzle-orm';
 import { getAuthSession, findOrCreateAiUser } from '../../utils/auth';
 import { getValidZohoToken } from '../../utils/zoho';
-import { aiQueryRequests } from '../../utils/schema';
+import { aiQueryRequests, users } from '../../utils/schema';
+import { sendEmail } from '../../utils/mail';
 
 export default defineEventHandler(async (event) => {
   const session = await getAuthSession(event);
@@ -81,11 +82,59 @@ export default defineEventHandler(async (event) => {
 
     const fileLink = fileInfo.Permalink || `https://workdrive.zoho.com/file/${fileInfo.resource_id}`;
 
-    // Save Zoho link back to request record if requestId provided
+    // Save Zoho link + expiresAt back to request record if requestId provided
+    const zohoExpiresAt = options?.expiresAt ? new Date(options.expiresAt) : null;
     if (requestId) {
       await db.update(aiQueryRequests)
-        .set({ zohoLink: fileLink })
+        .set({
+          zohoLink: fileLink,
+          ...(zohoExpiresAt ? { expiresAt: zohoExpiresAt } : {}),
+        })
         .where(eq(aiQueryRequests.id, requestId));
+    }
+
+    // ส่งเมลล์แจ้ง owner ถ้า owner เป็นคนละคนกับผู้ login
+    if (options?.ownerVtigerId && options.ownerVtigerId !== session.vtigerId) {
+      const ownerVtigerId = Number(options.ownerVtigerId);
+      const ownerRecord = await db.query.users.findFirst({ where: eq(users.vtigerId, ownerVtigerId) });
+      const ownerEmail = ownerRecord?.email;
+      if (ownerEmail) {
+        const ownerName = ownerRecord?.displayName || `User #${ownerVtigerId}`;
+        const baseUrl = process.env.APP_URL || 'http://localhost:3000';
+        const creatorName = session.displayName as string || 'ผู้ดูแลระบบ';
+        sendEmail({
+          to: ownerEmail,
+          subject: `📊 ${creatorName} ได้เตรียมข้อมูลสำหรับคุณแล้ว (Zoho WorkDrive)`,
+          html: `
+            <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;background-color:#f4f7fa;padding:30px 10px;">
+              <div style="max-width:580px;margin:0 auto;background-color:#fff;border-radius:12px;overflow:hidden;border:1px solid #e1e8f0;box-shadow:0 4px 6px rgba(0,0,0,0.02);">
+                <div style="background-color:#0f9d58;padding:25px;text-align:center;">
+                  <div style="display:inline-block;background:rgba(255,255,255,0.2);padding:12px;border-radius:12px;margin-bottom:12px;">
+                    <span style="font-size:32px;line-height:1;">📊</span>
+                  </div>
+                  <h2 style="margin:0;color:#fff;font-size:20px;font-weight:700;">ไฟล์ข้อมูลพร้อมแล้วบน Zoho WorkDrive</h2>
+                </div>
+                <div style="padding:30px 25px;">
+                  <p style="margin:0 0 15px;font-size:15px;color:#64748b;">เรียน <b>${ownerName}</b>,</p>
+                  <p style="margin:0 0 20px;font-size:14px;color:#64748b;"><strong>${creatorName}</strong> ได้อัพโหลดไฟล์ข้อมูลสำหรับคุณไปยัง Zoho WorkDrive เรียบร้อยแล้ว</p>
+                  <div style="text-align:center;margin-bottom:24px;">
+                    <a href="${fileLink}" style="display:inline-block;background-color:#0f9d58;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:700;font-size:14px;">เปิดไฟล์ใน Zoho WorkDrive</a>
+                  </div>
+                  <div style="background:#f8fafc;border-radius:10px;padding:16px;border:1px solid #edf2f7;margin-bottom:16px;">
+                    <p style="margin:0 0 6px;font-size:12px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.05em;">📁 ชื่อไฟล์</p>
+                    <p style="margin:0;font-size:13px;color:#1e293b;font-family:monospace;">${fileName}</p>
+                  </div>
+                  ${zohoExpiresAt ? `<p style="margin:0 0 16px;font-size:13px;color:#ef4444;"><strong>⏰ ลิงก์นี้จะหมดอายุวันที่:</strong> ${new Date(zohoExpiresAt).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' })}</p>` : ''}
+                  <p style="margin:0;font-size:12px;color:#94a3b8;">นอกจากนี้ยังสามารถดาวน์โหลดข้อมูลได้ที่ <a href="${baseUrl}/history" style="color:#4f46e5;">หน้าประวัติข้อมูล</a> โดยใช้ Username และ Password ของ Vtiger CRM เพื่อเข้าสู่ระบบ</p>
+                </div>
+                <div style="padding:16px 25px;background:#f8fafc;border-top:1px solid #e2e8f0;text-align:center;">
+                  <p style="margin:0;font-size:11px;color:#94a3b8;">อีเมลนี้ส่งโดยอัตโนมัติจาก Vtiger AI Query System</p>
+                </div>
+              </div>
+            </div>
+          `
+        }).catch(err => console.warn('Owner Zoho notification email failed:', err));
+      }
     }
 
     return {

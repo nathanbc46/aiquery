@@ -47,8 +47,13 @@ export default defineEventHandler(async (event) => {
     const recentQuery = db.select({
       id: aiQueryRequests.id,
       queryText: aiQueryRequests.queryText,
+      generatedSql: aiQueryRequests.generatedSql,
+      explanationTh: aiQueryRequests.explanationTh,
       status: aiQueryRequests.status,
       resultCount: aiQueryRequests.resultCount,
+      downloadCount: aiQueryRequests.downloadCount,
+      zohoLink: aiQueryRequests.zohoLink,
+      expiresAt: aiQueryRequests.expiresAt,
       createdAt: aiQueryRequests.createdAt,
       user: users.displayName
     })

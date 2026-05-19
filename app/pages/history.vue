@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+const route = useRoute()
 import { format } from 'sql-formatter'
 import ApexCharts from 'apexcharts'
 import { 
@@ -448,10 +449,15 @@ const fetchHistory = async (page = 1) => {
 // Watch search with debounce
 watch(searchQuery, () => {
   clearTimeout(searchTimeout)
-  searchTimeout = setTimeout(() => {
-    fetchHistory(1)
-  }, 500)
+  searchTimeout = setTimeout(() => fetchHistory(1), 500)
 })
+
+// ล้างช่องค้นหาและ fetch ทันที (ป้องกัน watch debounce ทำให้โหลด 2 ครั้ง)
+const clearSearch = () => {
+  searchQuery.value = ''
+  fetchHistory(1)
+  nextTick(() => clearTimeout(searchTimeout))
+}
 
 const loadMore = () => {
   fetchHistory(pagination.value.page + 1)
@@ -722,6 +728,12 @@ const openAnalyze = (id: string) => {
 }
 
 onMounted(() => {
+  // อ่าน ?search= จาก URL (เช่น มาจาก dashboard คลิก top requester)
+  if (route.query.search) {
+    searchQuery.value = String(route.query.search)
+    // watcher จะตั้ง debounce ไว้ — ยกเลิกทันที แล้วเรียก fetchHistory ครั้งเดียว
+    nextTick(() => clearTimeout(searchTimeout))
+  }
   fetchHistory(1)
 
   // โหลดประวัติการวิเคราะห์และแชตจาก Offline (localStorage)
@@ -776,20 +788,22 @@ onUnmounted(() => {
       <div class="flex flex-col md:flex-row items-stretch md:items-center gap-4">
         <!-- Search Bar -->
         <div class="relative group">
-          <Search class="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 group-focus-within:text-blue-500 transition-colors" />
+          <Search class="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 group-focus-within:text-blue-500 transition-colors pointer-events-none" />
           <input
             v-model="searchQuery"
             @keyup.enter="fetchHistory(1)"
             type="text"
             placeholder="ค้นหาตามคำถาม หรือ ID..."
-            class="pl-11 pr-10 py-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all w-full md:w-80 shadow-sm outline-none"
+            class="pl-11 py-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-colors w-full md:w-80 shadow-sm outline-none"
+            :class="searchQuery ? 'pr-9' : 'pr-4'"
           />
-          <button 
-            v-if="searchQuery" 
-            @click="searchQuery = ''; fetchHistory(1)"
-            class="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg transition-colors text-slate-500"
+          <button
+            v-if="searchQuery"
+            type="button"
+            @click="clearSearch"
+            class="absolute inset-y-0 right-0 flex items-center pr-3 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
           >
-            <X class="w-3.5 h-3.5" />
+            <X class="w-4 h-4" />
           </button>
         </div>
 

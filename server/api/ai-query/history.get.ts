@@ -33,12 +33,20 @@ export default defineEventHandler(async (event) => {
     let whereClause = baseCondition;
 
     if (search) {
+      // ค้นหา user ids ที่ชื่อตรงกับ search ก่อน
+      const matchedUsers = await db
+        .select({ id: users.id })
+        .from(users)
+        .where(like(users.displayName, `%${search}%`));
+      const matchedUserIds = matchedUsers.map(u => u.id);
+
       const searchCondition = or(
         like(aiQueryRequests.queryText, `%${search}%`),
-        like(aiQueryRequests.id, `%${search}%`)
+        like(aiQueryRequests.id, `%${search}%`),
+        ...(matchedUserIds.length ? [inArray(aiQueryRequests.userId, matchedUserIds)] : [])
       );
-      
-      whereClause = baseCondition 
+
+      whereClause = baseCondition
         ? and(baseCondition, searchCondition)
         : searchCondition;
     }

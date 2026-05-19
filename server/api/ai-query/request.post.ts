@@ -5,6 +5,63 @@ import { findOrCreateAiUser } from '../../utils/auth';
 import { sendEmail } from '../../utils/mail';
 import { or, eq } from 'drizzle-orm';
 
+async function sendOwnerNotificationEmail(opts: {
+  ownerVtigerId: number;
+  createdByDisplayName: string;
+  queryText: string;
+  baseUrl: string;
+  zohoLink?: string;
+}) {
+  const db = await useDb();
+  const ownerRecord = await db.query.users.findFirst({ where: eq(users.vtigerId, opts.ownerVtigerId) });
+  const ownerEmail = ownerRecord?.email;
+  if (!ownerEmail) return;
+
+  const ownerName = ownerRecord?.displayName || `User #${opts.ownerVtigerId}`;
+  const downloadSection = opts.zohoLink
+    ? `<p style="margin:0 0 15px;font-size:14px;color:#64748b;">ไฟล์ข้อมูลถูกอัพโหลดไปยัง <strong>Zoho WorkDrive</strong> เรียบร้อยแล้ว คลิกลิงก์ด้านล่างเพื่อเปิดไฟล์:</p>
+       <div style="text-align:center;margin-bottom:20px;">
+         <a href="${opts.zohoLink}" style="display:inline-block;background-color:#0f9d58;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:700;font-size:14px;">เปิดไฟล์ใน Zoho WorkDrive</a>
+       </div>`
+    : `<p style="margin:0 0 15px;font-size:14px;color:#64748b;">ไฟล์ข้อมูลพร้อมให้ดาวน์โหลดแล้ว กรุณาเข้าสู่ระบบเพื่อดาวน์โหลด:</p>
+       <div style="text-align:center;margin-bottom:20px;">
+         <a href="${opts.baseUrl}/history" style="display:inline-block;background-color:#4f46e5;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:700;font-size:14px;">เข้าสู่หน้าประวัติข้อมูล</a>
+       </div>
+       <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px;margin-bottom:20px;">
+         <p style="margin:0 0 8px;font-size:13px;color:#64748b;font-weight:600;">🔑 วิธีเข้าสู่ระบบ</p>
+         <p style="margin:0;font-size:13px;color:#475569;">ใช้ <strong>Username และ Password ของ Vtiger CRM</strong> เพื่อเข้าสู่ระบบที่ลิงก์ด้านบน แล้วเข้าเมนู "ประวัติข้อมูล" เพื่อดาวน์โหลดไฟล์</p>
+       </div>`;
+
+  await sendEmail({
+    to: ownerEmail,
+    subject: `📊 ${opts.createdByDisplayName} ได้เตรียมข้อมูลสำหรับคุณแล้ว`,
+    html: `
+      <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;background-color:#f4f7fa;padding:30px 10px;">
+        <div style="max-width:580px;margin:0 auto;background-color:#fff;border-radius:12px;overflow:hidden;border:1px solid #e1e8f0;box-shadow:0 4px 6px rgba(0,0,0,0.02);">
+          <div style="background-color:#4f46e5;padding:25px;text-align:center;">
+            <div style="display:inline-block;background:rgba(255,255,255,0.2);padding:12px;border-radius:12px;margin-bottom:12px;">
+              <span style="font-size:32px;line-height:1;">📊</span>
+            </div>
+            <h2 style="margin:0;color:#fff;font-size:20px;font-weight:700;">มีข้อมูลรอการดาวน์โหลด</h2>
+          </div>
+          <div style="padding:30px 25px;">
+            <p style="margin:0 0 15px;font-size:15px;color:#64748b;">เรียน <b>${ownerName}</b>,</p>
+            <p style="margin:0 0 20px;font-size:14px;color:#64748b;"><strong>${opts.createdByDisplayName}</strong> ได้ดึงข้อมูลสำหรับคุณเรียบร้อยแล้ว รายละเอียดดังนี้:</p>
+            <div style="background:#f8fafc;border-radius:10px;padding:16px;border:1px solid #edf2f7;margin-bottom:24px;">
+              <p style="margin:0 0 6px;font-size:12px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.05em;">📝 คำสั่งข้อมูล</p>
+              <p style="margin:0;font-size:14px;color:#1e293b;line-height:1.5;"><i>"${opts.queryText}"</i></p>
+            </div>
+            ${downloadSection}
+          </div>
+          <div style="padding:16px 25px;background:#f8fafc;border-top:1px solid #e2e8f0;text-align:center;">
+            <p style="margin:0;font-size:11px;color:#94a3b8;">อีเมลนี้ส่งโดยอัตโนมัติจาก Vtiger AI Query System</p>
+          </div>
+        </div>
+      </div>
+    `
+  });
+}
+
 export default defineEventHandler(async (event) => {
   const body = await readBody(event);
   const { queryText, generatedSql, explanation, resultCount, requestReason, ownerVtigerId, expiresAt } = body;
@@ -69,6 +126,17 @@ export default defineEventHandler(async (event) => {
           } catch (err) {
             console.error('Update owner failed:', err);
           }
+        }
+
+        // ส่งเมลล์แจ้ง owner ถ้า owner เป็นคนละคนกับผู้ login
+        const baseUrl = process.env.APP_URL || 'http://localhost:3000';
+        if (ownerVtigerId && ownerVtigerId !== session.vtigerId) {
+          sendOwnerNotificationEmail({
+            ownerVtigerId: Number(ownerVtigerId),
+            createdByDisplayName: session.displayName as string,
+            queryText,
+            baseUrl,
+          }).catch(err => console.warn('Owner notification email failed:', err));
         }
 
         return { success: true, requestId, autoApproved: true };

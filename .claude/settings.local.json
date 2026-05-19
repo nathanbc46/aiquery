@@ -16,7 +16,11 @@
       "Bash(npm show *)",
       "Bash(Wait-Event -Timeout 90)",
       "Bash(Get-Content \"C:\\\\Users\\\\CB1EE~1.SUT\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\D--aiquery\\\\edc39a08-e2ba-4fe5-865b-d4a80f48111f\\\\tasks\\\\br9c7tode.output\" -Tail 20)",
-      "Bash(npm run *)"
+      "Bash(npm run *)",
+      "Bash(npx nuxi *)",
+      "Bash(node -e \"require\\('sql-formatter'\\)\")",
+      "Bash(Select-String -Path \"D:\\\\aiquery\\\\app\\\\pages\\\\dashboard.vue\" -Pattern \"</template>\")",
+      "Bash(Select-Object -Last 1)"
     ]
   }
 }
