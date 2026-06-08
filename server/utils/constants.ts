@@ -193,12 +193,14 @@ Table: vtiger_salesorder (Sales Orders / ใบสั่งขาย)
 - contactid (INT, Joins with vtiger_contactdetails.contactid)
 - total (DECIMAL, Total Amount)
 - adjustment (DECIMAL, ส่วนลดหรือค่าปรับปรุงเพิ่มเติม)
+- purchaseorder (VARCHAR, Customer PO Number / เลขที่ใบสั่งซื้อของลูกค้า)
 - sostatus (VARCHAR, Status e.g. 'Created', 'Waiting for Approval', 'Approved', 'Rejected', 'Ordered', 'Goods Received', 'Tax Invoice', 'Closed', 'Cancelled', 'Paid')
 - Note: To get createdtime, MUST JOIN with vtiger_crmentity ON vtiger_salesorder.salesorderid = vtiger_crmentity.crmid and use vtiger_crmentity.createdtime (do NOT use so.createdtime or vtiger_salesorder.createdtime)
 
 Table: vtiger_salesordercf (Sales Order Custom Fields / ข้อมูลเพิ่มเติมของใบสั่งขาย)
 - salesorderid (INT, Primary Key, joins with vtiger_salesorder.salesorderid)
-- cf_678 (VARCHAR, Project Plan Number / เลขที่แผนโครงการ)
+- cf_678 (VARCHAR, Project Plan No / เลขที่แผนโครงการ)
+- cf_792 (VARCHAR, Invoice No / เลขที่ใบกำกับภาษี)
 
 Note on Sales Reporting:
 - To find sales by campaign: JOIN vtiger_salesorder → vtiger_potential → vtiger_campaign (via vtiger_potential.campaignid)
