@@ -97,6 +97,8 @@ const debugInfo = ref<any>(null)
 const inputMode = ref<'natural' | 'sql'>('natural')
 const directSql = ref('')
 const directSqlError = ref('')
+const sqlFixSuggestion = ref<{ cause: string; fix: string; fixedSql: string | null } | null>(null)
+const isFixingSql = ref(false)
 
 // Direct download (no history)
 const isDirectDownloading = ref(false)
@@ -790,6 +792,12 @@ const confirmDeleteFavorite = async () => {
 const submitBtnRef = ref<HTMLElement | null>(null)
 
 const useFavorite = (fav: any) => {
+  if (inputMode.value === 'sql') {
+    directSql.value = formatSql(fav.generatedSql || fav.queryText || '')
+    directSqlError.value = ''
+    sqlFixSuggestion.value = null
+    return
+  }
   prompt.value = fav.queryText
   focusAndEnd()
   if (window.innerWidth < 1024) {
@@ -1393,6 +1401,8 @@ const submitDirectSql = async () => {
       })
     ])
 
+    sqlFixSuggestion.value = null
+
     if (previewRes.success) {
       generatedResult.value.previewData = previewRes.data
       generatedResult.value.previewCount = previewRes.totalCount
@@ -1412,13 +1422,40 @@ const submitDirectSql = async () => {
     } else {
       directSqlError.value = previewRes.error || 'SQL ไม่ถูกต้อง'
       generatedResult.value = null
+      fetchSqlFix(directSql.value, directSqlError.value)
     }
   } catch (e: any) {
     directSqlError.value = e?.data?.message || e?.message || 'ไม่สามารถรันคำสั่ง SQL นี้ได้'
     generatedResult.value = null
+    fetchSqlFix(directSql.value, directSqlError.value)
   } finally {
     isUpdatingSql.value = false
   }
+}
+
+const fetchSqlFix = async (sqlText: string, errorMsg: string) => {
+  isFixingSql.value = true
+  sqlFixSuggestion.value = null
+  try {
+    const res = await $fetch<any>('/api/ai-query/fix-sql', {
+      method: 'POST',
+      body: { sql: sqlText, error: errorMsg }
+    })
+    if (res.success && res.suggestion) {
+      sqlFixSuggestion.value = res.suggestion
+    }
+  } catch {
+    // ถ้า AI ช่วยไม่ได้ก็ไม่แสดงอะไร
+  } finally {
+    isFixingSql.value = false
+  }
+}
+
+const applyFixedSql = () => {
+  if (!sqlFixSuggestion.value?.fixedSql) return
+  directSql.value = sqlFixSuggestion.value.fixedSql
+  directSqlError.value = ''
+  sqlFixSuggestion.value = null
 }
 
 const updateSql = async () => {
@@ -1599,7 +1636,7 @@ const highlightSql = (sqlStr: string) => {
         <div class="flex items-center gap-1 p-1 bg-slate-200/70 dark:bg-slate-800/70 rounded-2xl w-fit">
           <button
             type="button"
-            @click="inputMode = 'natural'; directSqlError = ''"
+            @click="inputMode = 'natural'; directSqlError = ''; sqlFixSuggestion = null"
             :class="inputMode === 'natural'
               ? 'bg-white dark:bg-slate-700 shadow text-slate-900 dark:text-white'
               : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'"
@@ -1610,7 +1647,7 @@ const highlightSql = (sqlStr: string) => {
           </button>
           <button
             type="button"
-            @click="inputMode = 'sql'; directSqlError = ''"
+            @click="inputMode = 'sql'; directSqlError = ''; sqlFixSuggestion = null"
             :class="inputMode === 'sql'
               ? 'bg-white dark:bg-slate-700 shadow text-slate-900 dark:text-white'
               : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'"
@@ -1678,15 +1715,38 @@ const highlightSql = (sqlStr: string) => {
             ></textarea>
 
             <!-- Direct SQL Input -->
-            <textarea
-              v-else
-              v-model="directSql"
-              :readonly="isUpdatingSql"
-              @keydown.ctrl.enter.prevent="submitDirectSql()"
-              placeholder="วางคำสั่ง SQL ที่นี่... (Ctrl+Enter เพื่อรัน)"
-              class="w-full bg-slate-950 border border-slate-700 rounded-[1.5rem] px-6 py-5 text-emerald-400 placeholder-slate-600 focus:outline-none focus:ring-4 focus:ring-emerald-500/10 focus:border-emerald-500 transition-[border-color,box-shadow,opacity] resize-y min-h-[220px] text-sm leading-relaxed shadow-inner font-mono disabled:opacity-50"
-              :disabled="isUpdatingSql"
-            ></textarea>
+            <div v-else class="relative">
+              <textarea
+                v-model="directSql"
+                :readonly="isUpdatingSql"
+                @keydown.ctrl.enter.prevent="submitDirectSql()"
+                @paste.prevent="(e) => { const text = e.clipboardData?.getData('text') || ''; directSql = formatSql(text) || text }"
+                placeholder="วางคำสั่ง SQL ที่นี่... (Ctrl+Enter เพื่อรัน)"
+                class="w-full bg-slate-950 border border-slate-700 rounded-[1.5rem] px-6 py-5 pr-24 text-emerald-400 placeholder-slate-600 focus:outline-none focus:ring-4 focus:ring-emerald-500/10 focus:border-emerald-500 transition-[border-color,box-shadow,opacity] resize-y min-h-[220px] text-sm leading-relaxed shadow-inner font-mono disabled:opacity-50"
+                :disabled="isUpdatingSql"
+              ></textarea>
+
+              <div v-if="directSql" class="absolute top-4 right-4 flex items-center gap-1">
+                <button
+                  type="button"
+                  @click="directSql = formatSql(directSql)"
+                  :disabled="isUpdatingSql"
+                  class="px-2.5 py-1.5 rounded-lg text-[10px] font-black text-slate-400 hover:text-emerald-400 hover:bg-emerald-500/10 border border-slate-700 hover:border-emerald-700 transition-all disabled:opacity-50 uppercase tracking-widest"
+                  title="จัดรูปแบบ SQL (Format)"
+                >
+                  Format
+                </button>
+                <button
+                  type="button"
+                  @click="directSql = ''; directSqlError = ''; sqlFixSuggestion = null"
+                  :disabled="isUpdatingSql"
+                  class="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 border border-slate-700 hover:border-rose-800 transition-all disabled:opacity-50"
+                  title="ล้าง SQL"
+                >
+                  <X class="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
 
             <!-- File Input (Hidden) -->
             <input 
@@ -1718,7 +1778,8 @@ const highlightSql = (sqlStr: string) => {
 
             <div class="absolute right-5 bottom-5 flex items-center gap-2">
               <ClientOnly>
-                <button 
+                <template v-if="inputMode === 'natural'">
+                <button
                   type="button"
                   @click="triggerFileUpload"
                   :disabled="isGenerating || isParsingFile"
@@ -1730,7 +1791,7 @@ const highlightSql = (sqlStr: string) => {
                   {{ uploadedFileName ? 'เปลี่ยนไฟล์' : 'แนบไฟล์' }}
                 </button>
 
-                <button 
+                <button
                   v-if="prompt"
                   type="button"
                   @click="refinePrompt"
@@ -1742,29 +1803,29 @@ const highlightSql = (sqlStr: string) => {
                   <RotateCcw v-else class="w-3.5 h-3.5 animate-spin" />
                   {{ isRefining ? 'กำลังขัดเกลา...' : 'ช่วยเขียนให้ดีขึ้น' }}
                 </button>
+                  <button
+                    v-if="originalPrompt && prompt !== originalPrompt"
+                    type="button"
+                    @click="revertToOriginal"
+                    :disabled="isGenerating"
+                    class="flex items-center gap-2 px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 text-[10px] font-black rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all active:scale-95 uppercase tracking-widest disabled:opacity-50"
+                    title="กลับไปใช้ข้อความก่อนขัดเกลา"
+                  >
+                    <RotateCcw class="w-3.5 h-3.5" />
+                    ใช้ข้อความเดิม
+                  </button>
 
-                <button 
-                  v-if="originalPrompt && prompt !== originalPrompt"
-                  type="button"
-                  @click="revertToOriginal"
-                  :disabled="isGenerating"
-                  class="flex items-center gap-2 px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 text-[10px] font-black rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all active:scale-95 uppercase tracking-widest disabled:opacity-50"
-                  title="กลับไปใช้ข้อความก่อนขัดเกลา"
-                >
-                  <RotateCcw class="w-3.5 h-3.5" />
-                  ใช้ข้อความเดิม
-                </button>
-                
-                <button 
-                  v-if="prompt"
-                  type="button"
-                  @click="clearInput"
-                  :disabled="isGenerating"
-                  class="p-2.5 rounded-xl text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/20 transition-all shadow-sm border border-transparent hover:border-rose-100 dark:hover:border-rose-900/30 disabled:opacity-50 disabled:cursor-not-allowed"
-                  title="ล้างข้อความ"
-                >
-                  <X class="w-5 h-5" />
-                </button>
+                  <button
+                    v-if="prompt"
+                    type="button"
+                    @click="clearInput"
+                    :disabled="isGenerating"
+                    class="p-2.5 rounded-xl text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/20 transition-all shadow-sm border border-transparent hover:border-rose-100 dark:hover:border-rose-900/30 disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="ล้างข้อความ"
+                  >
+                    <X class="w-5 h-5" />
+                  </button>
+                </template>
               </ClientOnly>
             </div>
           </div>
@@ -1924,13 +1985,59 @@ const highlightSql = (sqlStr: string) => {
 
         <!-- Direct SQL Error Alert -->
         <transition name="fade">
-          <div v-if="directSqlError && inputMode === 'sql'" class="mt-6 p-6 bg-rose-50 dark:bg-rose-900/10 border border-rose-200 dark:border-rose-900/30 rounded-3xl flex items-start gap-4 animate-in slide-in-from-top-2 duration-300">
-            <div class="p-2 bg-white dark:bg-rose-900/30 rounded-xl shadow-sm border border-rose-100 dark:border-rose-800 shrink-0">
-              <AlertCircle class="w-6 h-6 text-rose-500" />
+          <div v-if="directSqlError && inputMode === 'sql'" class="mt-6 space-y-3 animate-in slide-in-from-top-2 duration-300">
+            <!-- Error Message -->
+            <div class="p-5 bg-rose-50 dark:bg-rose-900/10 border border-rose-200 dark:border-rose-900/30 rounded-2xl flex items-start gap-4">
+              <div class="p-2 bg-white dark:bg-rose-900/30 rounded-xl shadow-sm border border-rose-100 dark:border-rose-800 shrink-0">
+                <AlertCircle class="w-5 h-5 text-rose-500" />
+              </div>
+              <div class="flex-1 min-w-0">
+                <p class="text-rose-900 dark:text-rose-300 font-bold uppercase tracking-wider text-xs mb-1">SQL Error</p>
+                <p class="text-rose-700 dark:text-rose-400 text-sm font-mono break-all">{{ directSqlError }}</p>
+              </div>
             </div>
-            <div>
-              <p class="text-rose-900 dark:text-rose-300 font-bold uppercase tracking-wider text-xs mb-1">SQL Error</p>
-              <p class="text-rose-700 dark:text-rose-400 text-sm font-medium font-mono">{{ directSqlError }}</p>
+
+            <!-- AI Fix Loading -->
+            <div v-if="isFixingSql" class="flex items-center gap-3 px-5 py-4 bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800/40 rounded-2xl">
+              <Loader2 class="w-4 h-4 text-amber-500 animate-spin shrink-0" />
+              <p class="text-amber-700 dark:text-amber-400 text-sm font-medium">AI กำลังวิเคราะห์ error และแนะนำวิธีแก้ไข...</p>
+            </div>
+
+            <!-- AI Fix Suggestion -->
+            <div v-if="sqlFixSuggestion && !isFixingSql" class="p-5 bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800/40 rounded-2xl space-y-4">
+              <div class="flex items-center gap-2">
+                <div class="p-1.5 bg-amber-100 dark:bg-amber-900/40 rounded-lg">
+                  <Sparkles class="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                </div>
+                <p class="text-xs font-black text-amber-700 dark:text-amber-400 uppercase tracking-widest">AI แนะนำวิธีแก้ไข</p>
+              </div>
+
+              <!-- Cause -->
+              <div class="space-y-1">
+                <p class="text-[10px] font-black text-amber-600 dark:text-amber-500 uppercase tracking-widest">สาเหตุ</p>
+                <p class="text-sm text-amber-900 dark:text-amber-200 leading-relaxed">{{ sqlFixSuggestion.cause }}</p>
+              </div>
+
+              <!-- Fix -->
+              <div class="space-y-1">
+                <p class="text-[10px] font-black text-amber-600 dark:text-amber-500 uppercase tracking-widest">วิธีแก้ไข</p>
+                <p class="text-sm text-amber-900 dark:text-amber-200 leading-relaxed">{{ sqlFixSuggestion.fix }}</p>
+              </div>
+
+              <!-- Fixed SQL -->
+              <div v-if="sqlFixSuggestion.fixedSql" class="space-y-2">
+                <p class="text-[10px] font-black text-amber-600 dark:text-amber-500 uppercase tracking-widest">SQL ที่แก้ไขแล้ว</p>
+                <div class="relative bg-slate-950 rounded-xl p-4 font-mono text-xs text-emerald-400 overflow-x-auto max-h-48 overflow-y-auto">
+                  <pre class="whitespace-pre-wrap leading-relaxed">{{ sqlFixSuggestion.fixedSql }}</pre>
+                </div>
+                <button
+                  @click="applyFixedSql"
+                  class="flex items-center gap-2 px-5 py-2.5 bg-amber-500 hover:bg-amber-400 text-white text-xs font-black rounded-xl transition-all active:scale-95 uppercase tracking-widest shadow-md shadow-amber-500/20"
+                >
+                  <CheckCircle2 class="w-3.5 h-3.5" />
+                  ใช้ SQL นี้
+                </button>
+              </div>
             </div>
           </div>
         </transition>
