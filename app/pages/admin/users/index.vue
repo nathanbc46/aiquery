@@ -156,7 +156,7 @@ const saveUser = async () => {
 
     <!-- Create User Modal -->
     <transition name="modal">
-      <div v-if="isCreateModalOpen" class="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-slate-900/80 backdrop-blur-md">
+      <div v-if="isCreateModalOpen" class="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-slate-900/80">
         <div class="bg-white dark:bg-slate-900 rounded-[2.5rem] shadow-2xl w-full max-w-lg overflow-hidden border border-slate-200 dark:border-slate-800" @click.stop>
           <div class="px-8 py-6 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center bg-blue-50/30 dark:bg-blue-900/10">
             <h3 class="text-xl font-black text-blue-700 dark:text-blue-400 flex items-center gap-3 uppercase tracking-tighter">

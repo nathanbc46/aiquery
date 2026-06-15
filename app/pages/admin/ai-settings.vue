@@ -12,7 +12,8 @@ import {
   AlertCircle,
   Link,
   CheckCircle2,
-  XCircle
+  XCircle,
+  EyeOff
 } from 'lucide-vue-next'
 
 definePageMeta({
@@ -40,9 +41,20 @@ const settings = ref({
 
 const availableModels = ref<string[]>([])
 const isFetchingModels = ref(false)
+const openModelPickers = ref<Record<string, boolean>>({})
+
+const toggleModelPicker = async (key: string) => {
+  if (openModelPickers.value[key]) {
+    openModelPickers.value[key] = false
+  } else {
+    if (availableModels.value.length === 0) {
+      await fetchAvailableModels()
+    }
+    openModelPickers.value[key] = true
+  }
+}
 
 const fetchAvailableModels = async () => {
-  if (availableModels.value.length > 0) return
   isFetchingModels.value = true
   try {
     const response = await $fetch<any>('/api/admin/models')
@@ -280,9 +292,9 @@ onMounted(() => {
             />
             <div class="flex flex-wrap gap-2 mt-2 items-center">
               <span class="text-[10px] text-slate-500 font-bold uppercase tracking-wider">ตัวเลือก:</span>
-              <button 
-                v-if="availableModels.length === 0"
-                @click="fetchAvailableModels" 
+              <button
+                v-if="!openModelPickers['refine']"
+                @click="toggleModelPicker('refine')"
                 :disabled="isFetchingModels"
                 class="px-3 py-1 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 text-[10px] rounded-md transition-colors font-bold flex items-center gap-1 border border-indigo-200 dark:border-indigo-800/50"
               >
@@ -290,14 +302,24 @@ onMounted(() => {
                 <Database v-else class="w-3 h-3" />
                 ดึงรายชื่อโมเดลล่าสุด
               </button>
-              <button 
-                v-for="model in availableModels" 
-                :key="model"
-                @click="settings.refineModel = model" 
-                class="px-2 py-1 bg-slate-100 hover:bg-indigo-100 dark:bg-slate-800 dark:hover:bg-indigo-900/50 text-slate-600 dark:text-slate-300 text-[10px] rounded-md transition-colors font-medium border border-slate-200 dark:border-slate-700"
-              >
-                {{ model }}
-              </button>
+              <template v-else>
+                <button
+                  v-for="model in availableModels"
+                  :key="model"
+                  @click="settings.refineModel = model"
+                  class="px-2 py-1 bg-slate-100 hover:bg-indigo-100 dark:bg-slate-800 dark:hover:bg-indigo-900/50 text-slate-600 dark:text-slate-300 text-[10px] rounded-md transition-colors font-medium border border-slate-200 dark:border-slate-700"
+                >
+                  {{ model }}
+                </button>
+                <button
+                  @click="openModelPickers['refine'] = false"
+                  class="px-2 py-1 bg-slate-100 hover:bg-rose-100 dark:bg-slate-800 dark:hover:bg-rose-900/30 text-slate-400 hover:text-rose-500 text-[10px] rounded-md transition-colors font-bold flex items-center gap-1 border border-slate-200 dark:border-slate-700"
+                  title="ซ่อนรายชื่อโมเดล"
+                >
+                  <EyeOff class="w-3 h-3" />
+                  ซ่อน
+                </button>
+              </template>
             </div>
           </div>
 
@@ -361,9 +383,9 @@ onMounted(() => {
             />
             <div class="flex flex-wrap gap-2 mt-2 items-center">
               <span class="text-[10px] text-slate-500 font-bold uppercase tracking-wider">ตัวเลือก:</span>
-              <button 
-                v-if="availableModels.length === 0"
-                @click="fetchAvailableModels" 
+              <button
+                v-if="!openModelPickers['generate']"
+                @click="toggleModelPicker('generate')"
                 :disabled="isFetchingModels"
                 class="px-3 py-1 bg-blue-50 hover:bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 text-[10px] rounded-md transition-colors font-bold flex items-center gap-1 border border-blue-200 dark:border-blue-800/50"
               >
@@ -371,14 +393,24 @@ onMounted(() => {
                 <Database v-else class="w-3 h-3" />
                 ดึงรายชื่อโมเดลล่าสุด
               </button>
-              <button 
-                v-for="model in availableModels" 
-                :key="model"
-                @click="settings.generateModel = model" 
-                class="px-2 py-1 bg-slate-100 hover:bg-blue-100 dark:bg-slate-800 dark:hover:bg-blue-900/50 text-slate-600 dark:text-slate-300 text-[10px] rounded-md transition-colors font-medium border border-slate-200 dark:border-slate-700"
-              >
-                {{ model }}
-              </button>
+              <template v-else>
+                <button
+                  v-for="model in availableModels"
+                  :key="model"
+                  @click="settings.generateModel = model"
+                  class="px-2 py-1 bg-slate-100 hover:bg-blue-100 dark:bg-slate-800 dark:hover:bg-blue-900/50 text-slate-600 dark:text-slate-300 text-[10px] rounded-md transition-colors font-medium border border-slate-200 dark:border-slate-700"
+                >
+                  {{ model }}
+                </button>
+                <button
+                  @click="openModelPickers['generate'] = false"
+                  class="px-2 py-1 bg-slate-100 hover:bg-rose-100 dark:bg-slate-800 dark:hover:bg-rose-900/30 text-slate-400 hover:text-rose-500 text-[10px] rounded-md transition-colors font-bold flex items-center gap-1 border border-slate-200 dark:border-slate-700"
+                  title="ซ่อนรายชื่อโมเดล"
+                >
+                  <EyeOff class="w-3 h-3" />
+                  ซ่อน
+                </button>
+              </template>
             </div>
           </div>
 
@@ -407,9 +439,9 @@ onMounted(() => {
             />
             <div class="flex flex-wrap gap-2 mt-2 items-center">
               <span class="text-[10px] text-slate-500 font-bold uppercase tracking-wider">ตัวเลือก:</span>
-              <button 
-                v-if="availableModels.length === 0"
-                @click="fetchAvailableModels" 
+              <button
+                v-if="!openModelPickers['optimize']"
+                @click="toggleModelPicker('optimize')"
                 :disabled="isFetchingModels"
                 class="px-3 py-1 bg-blue-50 hover:bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 text-[10px] rounded-md transition-colors font-bold flex items-center gap-1 border border-blue-200 dark:border-blue-800/50"
               >
@@ -417,14 +449,24 @@ onMounted(() => {
                 <Database v-else class="w-3 h-3" />
                 ดึงรายชื่อโมเดลล่าสุด
               </button>
-              <button 
-                v-for="model in availableModels" 
-                :key="'opt-'+model"
-                @click="settings.optimizeModel = model" 
-                class="px-2 py-1 bg-slate-100 hover:bg-blue-100 dark:bg-slate-800 dark:hover:bg-blue-900/50 text-slate-600 dark:text-slate-300 text-[10px] rounded-md transition-colors font-medium border border-slate-200 dark:border-slate-700"
-              >
-                {{ model }}
-              </button>
+              <template v-else>
+                <button
+                  v-for="model in availableModels"
+                  :key="'opt-'+model"
+                  @click="settings.optimizeModel = model"
+                  class="px-2 py-1 bg-slate-100 hover:bg-blue-100 dark:bg-slate-800 dark:hover:bg-blue-900/50 text-slate-600 dark:text-slate-300 text-[10px] rounded-md transition-colors font-medium border border-slate-200 dark:border-slate-700"
+                >
+                  {{ model }}
+                </button>
+                <button
+                  @click="openModelPickers['optimize'] = false"
+                  class="px-2 py-1 bg-slate-100 hover:bg-rose-100 dark:bg-slate-800 dark:hover:bg-rose-900/30 text-slate-400 hover:text-rose-500 text-[10px] rounded-md transition-colors font-bold flex items-center gap-1 border border-slate-200 dark:border-slate-700"
+                  title="ซ่อนรายชื่อโมเดล"
+                >
+                  <EyeOff class="w-3 h-3" />
+                  ซ่อน
+                </button>
+              </template>
             </div>
           </div>
         </div>
@@ -464,9 +506,9 @@ onMounted(() => {
             />
             <div class="flex flex-wrap gap-2 mt-2 items-center">
               <span class="text-[10px] text-slate-500 font-bold uppercase tracking-wider">ตัวเลือก:</span>
-              <button 
-                v-if="availableModels.length === 0"
-                @click="fetchAvailableModels" 
+              <button
+                v-if="!openModelPickers['analyze']"
+                @click="toggleModelPicker('analyze')"
                 :disabled="isFetchingModels"
                 class="px-3 py-1 bg-violet-50 hover:bg-violet-100 dark:bg-violet-900/30 text-violet-600 dark:text-violet-400 text-[10px] rounded-md transition-colors font-bold flex items-center gap-1 border border-violet-200 dark:border-violet-800/50"
               >
@@ -474,14 +516,24 @@ onMounted(() => {
                 <Database v-else class="w-3 h-3" />
                 ดึงรายชื่อโมเดลล่าสุด
               </button>
-              <button 
-                v-for="model in availableModels" 
-                :key="model"
-                @click="settings.analyzeModel = model" 
-                class="px-2 py-1 bg-slate-100 hover:bg-violet-100 dark:bg-slate-800 dark:hover:bg-violet-900/50 text-slate-600 dark:text-slate-300 text-[10px] rounded-md transition-colors font-medium border border-slate-200 dark:border-slate-700"
-              >
-                {{ model }}
-              </button>
+              <template v-else>
+                <button
+                  v-for="model in availableModels"
+                  :key="model"
+                  @click="settings.analyzeModel = model"
+                  class="px-2 py-1 bg-slate-100 hover:bg-violet-100 dark:bg-slate-800 dark:hover:bg-violet-900/50 text-slate-600 dark:text-slate-300 text-[10px] rounded-md transition-colors font-medium border border-slate-200 dark:border-slate-700"
+                >
+                  {{ model }}
+                </button>
+                <button
+                  @click="openModelPickers['analyze'] = false"
+                  class="px-2 py-1 bg-slate-100 hover:bg-rose-100 dark:bg-slate-800 dark:hover:bg-rose-900/30 text-slate-400 hover:text-rose-500 text-[10px] rounded-md transition-colors font-bold flex items-center gap-1 border border-slate-200 dark:border-slate-700"
+                  title="ซ่อนรายชื่อโมเดล"
+                >
+                  <EyeOff class="w-3 h-3" />
+                  ซ่อน
+                </button>
+              </template>
             </div>
           </div>
 
@@ -533,9 +585,9 @@ onMounted(() => {
             />
             <div class="flex flex-wrap gap-2 mt-2 items-center">
               <span class="text-[10px] text-slate-500 font-bold uppercase tracking-wider">ตัวเลือก:</span>
-              <button 
-                v-if="availableModels.length === 0"
-                @click="fetchAvailableModels" 
+              <button
+                v-if="!openModelPickers['chat']"
+                @click="toggleModelPicker('chat')"
                 :disabled="isFetchingModels"
                 class="px-3 py-1 bg-teal-50 hover:bg-teal-100 dark:bg-teal-900/30 text-teal-600 dark:text-teal-400 text-[10px] rounded-md transition-colors font-bold flex items-center gap-1 border border-teal-200 dark:border-teal-800/50"
               >
@@ -543,14 +595,24 @@ onMounted(() => {
                 <Database v-else class="w-3 h-3" />
                 ดึงรายชื่อโมเดลล่าสุด
               </button>
-              <button 
-                v-for="model in availableModels" 
-                :key="model"
-                @click="settings.chatModel = model" 
-                class="px-2 py-1 bg-slate-100 hover:bg-teal-100 dark:bg-slate-800 dark:hover:bg-teal-900/50 text-slate-600 dark:text-slate-300 text-[10px] rounded-md transition-colors font-medium border border-slate-200 dark:border-slate-700"
-              >
-                {{ model }}
-              </button>
+              <template v-else>
+                <button
+                  v-for="model in availableModels"
+                  :key="model"
+                  @click="settings.chatModel = model"
+                  class="px-2 py-1 bg-slate-100 hover:bg-teal-100 dark:bg-slate-800 dark:hover:bg-teal-900/50 text-slate-600 dark:text-slate-300 text-[10px] rounded-md transition-colors font-medium border border-slate-200 dark:border-slate-700"
+                >
+                  {{ model }}
+                </button>
+                <button
+                  @click="openModelPickers['chat'] = false"
+                  class="px-2 py-1 bg-slate-100 hover:bg-rose-100 dark:bg-slate-800 dark:hover:bg-rose-900/30 text-slate-400 hover:text-rose-500 text-[10px] rounded-md transition-colors font-bold flex items-center gap-1 border border-slate-200 dark:border-slate-700"
+                  title="ซ่อนรายชื่อโมเดล"
+                >
+                  <EyeOff class="w-3 h-3" />
+                  ซ่อน
+                </button>
+              </template>
             </div>
           </div>
 

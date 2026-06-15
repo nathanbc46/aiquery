@@ -19,7 +19,8 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: 'SQL query is required' });
   }
 
-  if (!/^\s*SELECT\s/i.test(querySql)) {
+  const upperSql = querySql.trim().toUpperCase();
+  if (!upperSql.startsWith('SELECT') && !upperSql.startsWith('WITH')) {
     throw createError({ statusCode: 400, statusMessage: 'Only SELECT queries are allowed for export' });
   }
 

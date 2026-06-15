@@ -1132,7 +1132,7 @@ onUnmounted(() => {
       <transition name="fade">
         <div v-if="activeModalRequestId" class="fixed inset-0 z-[100] flex items-center justify-center transition-all duration-300" :class="isModalFullscreen ? 'p-0' : 'p-4'">
           <!-- Backdrop -->
-          <div class="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"></div>
+          <div class="absolute inset-0 bg-slate-900/60"></div>
           
           <!-- Modal Content -->
           <div 
@@ -1359,7 +1359,7 @@ onUnmounted(() => {
     <Teleport to="body">
       <transition name="fade">
         <div v-if="isSqlModalOpen" class="fixed inset-0 z-[110] flex items-center justify-center p-4">
-          <div class="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"></div>
+          <div class="absolute inset-0 bg-slate-900/60"></div>
           
           <div class="relative w-full max-w-4xl bg-white dark:bg-slate-900 rounded-[2.5rem] shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden flex flex-col max-h-[90vh]">
             <!-- Header -->
@@ -1427,7 +1427,7 @@ onUnmounted(() => {
     <Teleport to="body">
       <transition name="fade">
         <div v-if="renewRequestId" class="fixed inset-0 z-[120] flex items-center justify-center p-4">
-          <div class="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"></div>
+          <div class="absolute inset-0 bg-slate-900/60"></div>
           
           <div class="relative w-full max-w-md bg-white dark:bg-slate-900 rounded-[2rem] shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden animate-in zoom-in-95 duration-200">
             <!-- Header -->
@@ -1492,7 +1492,7 @@ onUnmounted(() => {
   <ClientOnly>
     <Teleport to="body">
       <transition name="modal">
-        <div v-if="editZohoModal" class="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md" @click.self="editZohoModal = false">
+        <div v-if="editZohoModal" class="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-950/80" @click.self="editZohoModal = false">
           <div class="bg-white dark:bg-[#1a1a1a] rounded-2xl shadow-2xl w-full max-w-md border border-slate-200 dark:border-white/10 overflow-hidden">
             <div class="p-5 border-b border-slate-100 dark:border-white/5 flex items-center justify-between">
               <div class="flex items-center gap-2">
@@ -1561,7 +1561,7 @@ onUnmounted(() => {
   <ClientOnly>
     <Teleport to="body">
       <transition name="modal">
-        <div v-if="deleteConfirmId" class="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-slate-900/80 backdrop-blur-md">
+        <div v-if="deleteConfirmId" class="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-slate-900/80">
           <div class="bg-white dark:bg-slate-900 rounded-[2.5rem] shadow-2xl w-full max-w-sm overflow-hidden border border-slate-200 dark:border-slate-800 animate-in zoom-in-95 duration-300" @click.stop>
             <div class="p-8 text-center space-y-6">
               <div class="w-20 h-20 bg-rose-50 dark:bg-rose-900/20 rounded-full flex items-center justify-center text-rose-500 mx-auto border border-rose-100 dark:border-rose-800/50">

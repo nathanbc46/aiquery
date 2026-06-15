@@ -433,7 +433,7 @@ const confirmReject = async () => {
     <ClientOnly>
       <Teleport to="body">
         <transition name="modal">
-          <div v-if="isRejectModalOpen" class="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-slate-900/80 backdrop-blur-md">
+          <div v-if="isRejectModalOpen" class="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-slate-900/80">
             <div class="bg-white dark:bg-slate-900 rounded-[2.5rem] shadow-2xl w-full max-w-lg overflow-hidden border border-slate-200 dark:border-slate-800" @click.stop>
 
               <!-- Header -->
@@ -491,7 +491,7 @@ const confirmReject = async () => {
     <ClientOnly>
       <Teleport to="body">
         <transition name="modal">
-          <div v-if="isSqlModalOpen" class="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-slate-900/80 backdrop-blur-md">
+          <div v-if="isSqlModalOpen" class="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-slate-900/80">
             <div class="bg-white dark:bg-slate-900 rounded-[2.5rem] shadow-2xl w-full max-w-5xl h-[85vh] overflow-hidden border border-slate-200 dark:border-slate-800 flex flex-col" @click.stop>
               <div class="px-8 py-6 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center bg-indigo-50/30 dark:bg-indigo-900/10 shrink-0">
                 <div class="flex items-center gap-4">
@@ -570,7 +570,7 @@ const confirmReject = async () => {
     <ClientOnly>
       <Teleport to="body">
         <transition name="modal">
-          <div v-if="isPreviewModalOpen" class="fixed inset-0 z-[100] flex items-center justify-center p-4 md:p-10 bg-slate-900/90 backdrop-blur-md">
+          <div v-if="isPreviewModalOpen" class="fixed inset-0 z-[100] flex items-center justify-center p-4 md:p-10 bg-slate-900/90">
             <div class="bg-white dark:bg-slate-900 rounded-[2.5rem] shadow-2xl w-full max-w-7xl h-full max-h-[90vh] overflow-hidden border border-slate-200 dark:border-slate-800 flex flex-col" @click.stop>
               <!-- Modal Header -->
               <div class="px-8 py-6 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center bg-indigo-50/30 dark:bg-indigo-900/10 shrink-0">
@@ -663,7 +663,7 @@ const confirmReject = async () => {
     <ClientOnly>
       <Teleport to="body">
         <transition name="modal">
-          <div v-if="isConfirmModalOpen" class="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-slate-900/80 backdrop-blur-md">
+          <div v-if="isConfirmModalOpen" class="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-slate-900/80">
             <div class="bg-white dark:bg-slate-900 rounded-[2.5rem] shadow-2xl w-full max-w-lg overflow-hidden border border-slate-200 dark:border-slate-800" @click.stop>
               <!-- Header -->
               <div class="p-8 pb-0 text-center">

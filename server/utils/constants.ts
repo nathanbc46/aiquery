@@ -245,6 +245,7 @@ Table: vtiger_assets (Assets / ทรัพย์สินลูกค้า)
 - datesold (DATE, Start Date / วันที่เริ่มรับบริการ)
 - dateinservice (DATE, End Date / วันที่หมดอายุ)
 - Joins with vtiger_assetscf via assetsid
+- IMPORTANT: vtiger_assets does NOT have a 'contactid' or 'contact' column. The contact person is stored in vtiger_assetscf.contactid. To use contact, you MUST JOIN vtiger_assetscf (acf) and reference acf.contactid — never a.contactid or a.contact.
 - IMPORTANT QUERY PATTERN — ACTIVE ASSETS (Most Recent Record Per Serial Number):
   Vtiger creates a new row in vtiger_assets every time an asset is renewed. To get only the
   LATEST (active) record for each unique serialnumber, use a CTE with ROW_NUMBER():
@@ -256,6 +257,9 @@ Table: vtiger_assets (Assets / ทรัพย์สินลูกค้า)
     WITH ranked AS (
       SELECT
         a.*,
+        acf.contactid,   -- contact is in vtiger_assetscf, NOT in vtiger_assets
+        acf.cf_790,
+        p.productcategory,
         ROW_NUMBER() OVER (
           PARTITION BY (
             CASE
@@ -274,10 +278,14 @@ Table: vtiger_assets (Assets / ทรัพย์สินลูกค้า)
       WHERE acf.cf_845 != 1   -- exclude converted/replaced records
     )
     SELECT r.assetname, r.serialnumber, r.tagnumber, r.datesold, r.dateinservice,
-           p.productname, acc.accountname
+           p.productname, acc.accountname,
+           CONCAT(c.firstname, ' ', c.lastname) AS contact_name
     FROM ranked r
     LEFT JOIN vtiger_products p ON r.product = p.productid
     LEFT JOIN vtiger_account acc ON r.account = acc.accountid
+    LEFT JOIN vtiger_contactdetails c ON r.contactid = c.contactid   -- use r.contactid (from acf), never a.contactid
+    LEFT JOIN vtiger_crmentity ce_c ON c.contactid = ce_c.crmid AND ce_c.deleted = 0
+    LEFT JOIN vtiger_salesorder so ON so.salesorderid = r.cf_870   -- link asset to originating Sales Order via acf.cf_870
     WHERE r.rn = 1
       AND ...
 
@@ -290,9 +298,9 @@ Table: vtiger_assets (Assets / ทรัพย์สินลูกค้า)
 
 Table: vtiger_assetscf (Assets Custom Fields / ข้อมูลเพิ่มเติมของทรัพย์สิน)
 - assetsid (INT, Primary Key, joins with vtiger_assets.assetsid)
-- cf_870 (INT, Joins with vtiger_salesorder.salesorderid, Indicates originating SO)
+- cf_870 (INT, Joins with vtiger_salesorder.salesorderid, Indicates originating SO — use: LEFT JOIN vtiger_salesorder so ON so.salesorderid = acf.cf_870)
 - cf_845 (TINYINT, Converted Flag: 1 = this asset record was converted/replaced by a new renewal record and must NOT be counted. ALWAYS filter WHERE vtiger_assetscf.cf_845 != 1 when querying active assets.)
-- contact_id (INT, Joins with vtiger_contactdetails.contactid, The person using the asset)
+- contactid (INT, Joins with vtiger_contactdetails.contactid, The person using the asset)
 
 CRITICAL RULES FOR SQL GENERATION:
 

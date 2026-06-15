@@ -93,6 +93,14 @@ const useHybridSchema = ref(false)
 const isDebugMode = ref(false)
 const debugInfo = ref<any>(null)
 
+// Direct SQL mode
+const inputMode = ref<'natural' | 'sql'>('natural')
+const directSql = ref('')
+const directSqlError = ref('')
+
+// Direct download (no history)
+const isDirectDownloading = ref(false)
+
 // File Upload State
 const fileInputRef = ref<HTMLInputElement | null>(null)
 const uploadedData = ref<any[] | null>(null)
@@ -607,6 +615,43 @@ const openCsvModal = () => {
     }
   })
   isCsvConfirmModalOpen.value = true
+}
+
+const downloadDirect = async () => {
+  if (!generatedResult.value?.sql || isDirectDownloading.value) return
+
+  isDirectDownloading.value = true
+  try {
+    const fn = (csvFilename.value || 'AI_Export')
+      .replace(/[^a-zA-Z0-9ก-๙\s_-]/g, '').trim().replace(/\s+/g, '_') || 'AI_Export'
+
+    const response = await fetch('/api/ai-query/export-direct', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: generatedResult.value.sql, filename: fn })
+    })
+
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({ statusMessage: 'ดาวน์โหลดไม่สำเร็จ' }))
+      toast.error('ดาวน์โหลดไม่สำเร็จ', err.statusMessage || 'กรุณาลองใหม่อีกครั้ง')
+      return
+    }
+
+    const blob = await response.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${fn}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+
+    isCsvConfirmModalOpen.value = false
+    toast.success('ดาวน์โหลดสำเร็จ', `บันทึกไฟล์ ${fn}.csv เรียบร้อยแล้ว`)
+  } catch (e: any) {
+    toast.error('ดาวน์โหลดไม่สำเร็จ', e?.message || 'กรุณาลองใหม่อีกครั้ง')
+  } finally {
+    isDirectDownloading.value = false
+  }
 }
 
 const openZohoModal = () => {
@@ -1327,6 +1372,55 @@ const cancelEditingSql = () => {
   sqlModalError.value = ''
 }
 
+const submitDirectSql = async () => {
+  if (!directSql.value.trim() || isUpdatingSql.value) return
+
+  isUpdatingSql.value = true
+  directSqlError.value = ''
+  generatedResult.value = { sql: directSql.value, explanation: 'กำลังวิเคราะห์คำสั่ง SQL...', status: 'success' }
+  showPreview.value = false
+
+  try {
+    // รัน SQL และดึง explanation พร้อมกัน
+    const [previewRes, explainRes] = await Promise.all([
+      $fetch<any>('/api/ai-query/preview', {
+        method: 'POST',
+        body: { query: directSql.value }
+      }),
+      $fetch<any>('/api/ai-query/explain-sql', {
+        method: 'POST',
+        body: { sql: directSql.value }
+      })
+    ])
+
+    if (previewRes.success) {
+      generatedResult.value.previewData = previewRes.data
+      generatedResult.value.previewCount = previewRes.totalCount
+      generatedResult.value.dbError = null
+      showPreview.value = true
+
+      // อัปเดต explanation และ prompt จาก AI
+      if (explainRes.success) {
+        generatedResult.value.explanation = explainRes.explanation
+        prompt.value = explainRes.humanReadable
+      } else {
+        generatedResult.value.explanation = 'คำสั่ง SQL โดยตรง'
+        prompt.value = 'คำสั่ง SQL โดยตรง'
+      }
+
+      toast.success('สำเร็จ', `พบข้อมูล ${(previewRes.totalCount ?? 0).toLocaleString()} รายการ`)
+    } else {
+      directSqlError.value = previewRes.error || 'SQL ไม่ถูกต้อง'
+      generatedResult.value = null
+    }
+  } catch (e: any) {
+    directSqlError.value = e?.data?.message || e?.message || 'ไม่สามารถรันคำสั่ง SQL นี้ได้'
+    generatedResult.value = null
+  } finally {
+    isUpdatingSql.value = false
+  }
+}
+
 const updateSql = async () => {
   if (!editedSql.value || isUpdatingSql.value) return
 
@@ -1498,8 +1592,35 @@ const highlightSql = (sqlStr: string) => {
     </header>
 
     <!-- Input Box (Action Zone) -->
-    <section class="rounded-[2.5rem] overflow-hidden transition-all duration-500 hover:shadow-indigo-500/10 relative z-10 border border-indigo-100 dark:border-indigo-900/30 bg-slate-100/90 dark:bg-slate-900/90 lg:backdrop-blur-xl shadow-2xl">
-      <form @submit.prevent="generateSql()" class="p-8 md:p-10 space-y-6">
+    <section class="rounded-[2.5rem] overflow-hidden relative z-10 border border-indigo-100 dark:border-indigo-900/30 bg-slate-100/90 dark:bg-slate-900/90 shadow-2xl">
+      <form @submit.prevent="inputMode === 'sql' ? submitDirectSql() : generateSql()" class="p-8 md:p-10 space-y-6">
+
+        <!-- Mode Switcher -->
+        <div class="flex items-center gap-1 p-1 bg-slate-200/70 dark:bg-slate-800/70 rounded-2xl w-fit">
+          <button
+            type="button"
+            @click="inputMode = 'natural'; directSqlError = ''"
+            :class="inputMode === 'natural'
+              ? 'bg-white dark:bg-slate-700 shadow text-slate-900 dark:text-white'
+              : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'"
+            class="flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-black transition-all uppercase tracking-widest"
+          >
+            <Sparkles class="w-3.5 h-3.5" />
+            ภาษาธรรมชาติ
+          </button>
+          <button
+            type="button"
+            @click="inputMode = 'sql'; directSqlError = ''"
+            :class="inputMode === 'sql'
+              ? 'bg-white dark:bg-slate-700 shadow text-slate-900 dark:text-white'
+              : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'"
+            class="flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-black transition-all uppercase tracking-widest"
+          >
+            <Terminal class="w-3.5 h-3.5" />
+            SQL โดยตรง
+          </button>
+        </div>
+
         <div class="space-y-6">
           <div class="flex items-center justify-between px-1">
             <label class="flex items-center gap-3 text-xs font-black text-slate-500 dark:text-slate-400 uppercase tracking-[0.2em]">
@@ -1544,14 +1665,27 @@ const highlightSql = (sqlStr: string) => {
           </div>
           
           <div class="relative group">
-            <textarea 
+            <!-- Natural Language Input -->
+            <textarea
+              v-if="inputMode === 'natural'"
               ref="textareaRef"
-              v-model="prompt" 
+              v-model="prompt"
               :readonly="isGenerating"
               @keydown.enter.exact.prevent="generateSql()"
-              placeholder="เช่น ขอลูกค้าที่มียอดสั่งซื้อเกิน 1 แสนบาทในปีนี้ พร้อมเบอร์ติดต่อ... (Enter เพื่อประมวลผล)" 
-              class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-[1.5rem] px-6 py-5 pr-14 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder:text-slate-600 focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 dark:focus:border-blue-400 transition-all resize-y min-h-[160px] text-lg leading-relaxed shadow-inner disabled:opacity-50"
+              placeholder="เช่น ขอลูกค้าที่มียอดสั่งซื้อเกิน 1 แสนบาทในปีนี้ พร้อมเบอร์ติดต่อ... (Enter เพื่อประมวลผล)"
+              class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-[1.5rem] px-6 py-5 pr-14 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder:text-slate-600 focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 dark:focus:border-blue-400 transition-[border-color,box-shadow,opacity] resize-y min-h-[160px] text-lg leading-relaxed shadow-inner disabled:opacity-50"
               :disabled="isGenerating"
+            ></textarea>
+
+            <!-- Direct SQL Input -->
+            <textarea
+              v-else
+              v-model="directSql"
+              :readonly="isUpdatingSql"
+              @keydown.ctrl.enter.prevent="submitDirectSql()"
+              placeholder="วางคำสั่ง SQL ที่นี่... (Ctrl+Enter เพื่อรัน)"
+              class="w-full bg-slate-950 border border-slate-700 rounded-[1.5rem] px-6 py-5 text-emerald-400 placeholder-slate-600 focus:outline-none focus:ring-4 focus:ring-emerald-500/10 focus:border-emerald-500 transition-[border-color,box-shadow,opacity] resize-y min-h-[220px] text-sm leading-relaxed shadow-inner font-mono disabled:opacity-50"
+              :disabled="isUpdatingSql"
             ></textarea>
 
             <!-- File Input (Hidden) -->
@@ -1697,60 +1831,113 @@ const highlightSql = (sqlStr: string) => {
           </div>
           
           <div class="flex flex-wrap items-center justify-end gap-3 shrink-0">
-            <button 
-              v-if="!isGenerating && isCancelled"
-              type="button"
-              @click="openManualSqlEditor"
-              class="px-8 py-5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-black rounded-[2rem] shadow-sm hover:bg-slate-200 dark:hover:bg-slate-700 transition-all flex items-center justify-center gap-3 active:scale-95 shrink-0 uppercase tracking-widest text-sm border border-slate-200 dark:border-slate-700"
-              title="เขียนคำสั่ง SQL ด้วยตัวเอง"
-            >
-              <Terminal class="w-6 h-6" />
-              เขียน SQL เอง
-            </button>
 
-            <button 
-              v-if="!isGenerating"
-              type="button"
-              @click="generateSql(true)"
-              :disabled="!prompt"
-              class="px-8 py-5 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-black rounded-[2rem] shadow-sm hover:bg-slate-50 dark:hover:bg-slate-700 transition-all flex items-center justify-center gap-3 active:scale-95 shrink-0 uppercase tracking-widest text-sm border border-slate-200 dark:border-slate-700"
-              title="สร้างเฉพาะคำสั่ง SQL โดยยังไม่รัน Query"
-            >
-              <Wand2 class="w-6 h-6" />
-              สร้าง SQL (ดราฟต์)
-            </button>
+            <!-- Natural Language Mode Buttons -->
+            <template v-if="inputMode === 'natural'">
+              <button
+                v-if="!isGenerating && isCancelled"
+                type="button"
+                @click="openManualSqlEditor"
+                class="px-8 py-5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-black rounded-[2rem] shadow-sm hover:bg-slate-200 dark:hover:bg-slate-700 transition-all flex items-center justify-center gap-3 active:scale-95 shrink-0 uppercase tracking-widest text-sm border border-slate-200 dark:border-slate-700"
+                title="เขียนคำสั่ง SQL ด้วยตัวเอง"
+              >
+                <Terminal class="w-6 h-6" />
+                เขียน SQL เอง
+              </button>
 
-            <button
-              v-if="!isGenerating"
-              ref="submitBtnRef"
-              type="submit"
-              :disabled="!prompt"
-              class="relative group px-12 py-5 bg-gradient-to-r from-slate-900 to-slate-800 dark:from-blue-600 dark:to-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed text-white font-black rounded-[2rem] shadow-2xl shadow-blue-500/30 transition-all flex items-center justify-center gap-3 active:scale-95 shrink-0 overflow-hidden uppercase tracking-widest text-sm"
-            >
-              <div class="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -translate-x-full group-hover:animate-shimmer"></div>
-              <div class="flex items-center gap-2">
-                <Database class="w-6 h-6 group-hover:scale-110 transition-transform" />
-              </div>
-              ประมวลผลทันที
-            </button>
+              <button
+                v-if="!isGenerating"
+                type="button"
+                @click="generateSql(true)"
+                :disabled="!prompt"
+                class="px-8 py-5 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-black rounded-[2rem] shadow-sm hover:bg-slate-50 dark:hover:bg-slate-700 transition-all flex items-center justify-center gap-3 active:scale-95 shrink-0 uppercase tracking-widest text-sm border border-slate-200 dark:border-slate-700"
+                title="สร้างเฉพาะคำสั่ง SQL โดยยังไม่รัน Query"
+              >
+                <Wand2 class="w-6 h-6" />
+                สร้าง SQL (ดราฟต์)
+              </button>
 
-            <button 
-              v-else
-              type="button" 
-              @click="cancelGenerate"
-              class="relative group px-12 py-5 bg-gradient-to-r from-slate-900 to-slate-800 dark:from-blue-600 dark:to-indigo-600 text-white font-black rounded-[2rem] shadow-2xl shadow-blue-500/30 transition-all flex items-center justify-center gap-3 active:scale-95 shrink-0 overflow-hidden uppercase tracking-widest text-sm hover:opacity-90"
-              title="ยกเลิกการทำงาน"
-            >
-              <div class="absolute inset-0 bg-white/20 animate-pulse"></div>
-              <Loader2 class="w-5 h-5 relative z-10 animate-spin" />
-              <span class="relative z-10">กำลังประมวลผล... (กดเพื่อหยุด)</span>
-            </button>
+              <button
+                v-if="!isGenerating"
+                ref="submitBtnRef"
+                type="submit"
+                :disabled="!prompt"
+                class="relative group px-12 py-5 bg-gradient-to-r from-slate-900 to-slate-800 dark:from-blue-600 dark:to-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed text-white font-black rounded-[2rem] shadow-2xl shadow-blue-500/30 transition-all flex items-center justify-center gap-3 active:scale-95 shrink-0 overflow-hidden uppercase tracking-widest text-sm"
+              >
+                <div class="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -translate-x-full group-hover:animate-shimmer"></div>
+                <div class="flex items-center gap-2">
+                  <Database class="w-6 h-6 group-hover:scale-110 transition-transform" />
+                </div>
+                ประมวลผลทันที
+              </button>
+
+              <button
+                v-else
+                type="button"
+                @click="cancelGenerate"
+                class="relative group px-12 py-5 bg-gradient-to-r from-slate-900 to-slate-800 dark:from-blue-600 dark:to-indigo-600 text-white font-black rounded-[2rem] shadow-2xl shadow-blue-500/30 transition-all flex items-center justify-center gap-3 active:scale-95 shrink-0 overflow-hidden uppercase tracking-widest text-sm hover:opacity-90"
+                title="ยกเลิกการทำงาน"
+              >
+                <div class="absolute inset-0 bg-white/20 animate-pulse"></div>
+                <Loader2 class="w-5 h-5 relative z-10 animate-spin" />
+                <span class="relative z-10">กำลังประมวลผล... (กดเพื่อหยุด)</span>
+              </button>
+            </template>
+
+            <!-- Direct SQL Mode Buttons -->
+            <template v-else>
+              <button
+                v-if="directSql"
+                type="button"
+                @click="directSql = ''; directSqlError = ''"
+                class="p-2.5 rounded-xl text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/20 transition-all shadow-sm border border-transparent hover:border-rose-100 dark:hover:border-rose-900/30"
+                title="ล้าง SQL"
+              >
+                <X class="w-5 h-5" />
+              </button>
+
+              <button
+                v-if="!isUpdatingSql"
+                type="submit"
+                :disabled="!directSql.trim()"
+                class="relative group px-12 py-5 bg-gradient-to-r from-emerald-700 to-emerald-600 dark:from-emerald-600 dark:to-teal-600 disabled:opacity-50 disabled:cursor-not-allowed text-white font-black rounded-[2rem] shadow-2xl shadow-emerald-500/30 transition-all flex items-center justify-center gap-3 active:scale-95 shrink-0 overflow-hidden uppercase tracking-widest text-sm"
+              >
+                <div class="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -translate-x-full group-hover:animate-shimmer"></div>
+                <Terminal class="w-6 h-6 group-hover:scale-110 transition-transform" />
+                รัน SQL
+              </button>
+
+              <button
+                v-else
+                type="button"
+                @click="isUpdatingSql = false"
+                class="relative group px-12 py-5 bg-gradient-to-r from-emerald-700 to-emerald-600 dark:from-emerald-600 dark:to-teal-600 text-white font-black rounded-[2rem] shadow-2xl shadow-emerald-500/30 transition-all flex items-center justify-center gap-3 active:scale-95 shrink-0 overflow-hidden uppercase tracking-widest text-sm hover:opacity-90"
+              >
+                <div class="absolute inset-0 bg-white/20 animate-pulse"></div>
+                <Loader2 class="w-5 h-5 relative z-10 animate-spin" />
+                <span class="relative z-10">กำลังรัน... (กดเพื่อหยุด)</span>
+              </button>
+            </template>
+
           </div>
         </div>
 
-        <!-- Inline Error Alert -->
+        <!-- Direct SQL Error Alert -->
         <transition name="fade">
-          <div v-if="error" class="mt-6 p-6 bg-rose-50 dark:bg-rose-900/10 border border-rose-200 dark:border-rose-900/30 rounded-3xl flex items-start gap-4 animate-in slide-in-from-top-2 duration-300">
+          <div v-if="directSqlError && inputMode === 'sql'" class="mt-6 p-6 bg-rose-50 dark:bg-rose-900/10 border border-rose-200 dark:border-rose-900/30 rounded-3xl flex items-start gap-4 animate-in slide-in-from-top-2 duration-300">
+            <div class="p-2 bg-white dark:bg-rose-900/30 rounded-xl shadow-sm border border-rose-100 dark:border-rose-800 shrink-0">
+              <AlertCircle class="w-6 h-6 text-rose-500" />
+            </div>
+            <div>
+              <p class="text-rose-900 dark:text-rose-300 font-bold uppercase tracking-wider text-xs mb-1">SQL Error</p>
+              <p class="text-rose-700 dark:text-rose-400 text-sm font-medium font-mono">{{ directSqlError }}</p>
+            </div>
+          </div>
+        </transition>
+
+        <!-- Inline Error Alert (Natural Language Mode) -->
+        <transition name="fade">
+          <div v-if="error && inputMode === 'natural'" class="mt-6 p-6 bg-rose-50 dark:bg-rose-900/10 border border-rose-200 dark:border-rose-900/30 rounded-3xl flex items-start gap-4 animate-in slide-in-from-top-2 duration-300">
             <div class="p-2 bg-white dark:bg-rose-900/30 rounded-xl shadow-sm border border-rose-100 dark:border-rose-800 shrink-0">
               <AlertCircle class="w-6 h-6 text-rose-500" />
             </div>
@@ -2227,7 +2414,7 @@ const highlightSql = (sqlStr: string) => {
     <ClientOnly>
       <Teleport to="body">
         <transition name="modal">
-          <div v-if="isRequestModalOpen" class="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-slate-900/80 backdrop-blur-md">
+          <div v-if="isRequestModalOpen" class="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-slate-900/80">
             <div class="bg-white dark:bg-slate-900 rounded-[2.5rem] shadow-2xl w-full max-w-2xl overflow-hidden border border-slate-200 dark:border-slate-800 animate-in zoom-in-95 duration-300" @click.stop>
               <div class="px-10 py-8 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center bg-blue-50/30 dark:bg-blue-900/10">
                 <div class="flex items-center gap-4">
@@ -2300,7 +2487,7 @@ const highlightSql = (sqlStr: string) => {
         <transition name="modal">
           <div
             v-if="isSqlModalOpen"
-            class="fixed inset-0 z-[110] flex items-center justify-center bg-slate-900/80 backdrop-blur-md"
+            class="fixed inset-0 z-[110] flex items-center justify-center bg-slate-900/80"
             :class="isSqlModalFullscreen ? '' : 'p-6'"
             @click="!isSqlModalFullscreen && (isSqlModalOpen = false)"
           >
@@ -2416,7 +2603,7 @@ const highlightSql = (sqlStr: string) => {
     <ClientOnly>
       <Teleport to="body">
         <transition name="modal">
-          <div v-if="isFavoriteModalOpen" class="fixed inset-0 z-[130] flex items-center justify-center p-6 bg-slate-900/80 backdrop-blur-md">
+          <div v-if="isFavoriteModalOpen" class="fixed inset-0 z-[130] flex items-center justify-center p-6 bg-slate-900/80">
             <div class="bg-white dark:bg-slate-900 rounded-[2.5rem] shadow-2xl w-full max-w-md overflow-hidden border border-slate-200 dark:border-slate-800 animate-in zoom-in-95 duration-300" @click.stop>
               <div class="px-8 py-6 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center bg-amber-50/30 dark:bg-amber-900/10">
                 <div class="flex items-center gap-3">
@@ -2475,7 +2662,7 @@ const highlightSql = (sqlStr: string) => {
     <ClientOnly>
       <Teleport to="body">
         <transition name="modal">
-          <div v-if="isZohoModalOpen" class="fixed inset-0 z-[160] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md">
+          <div v-if="isZohoModalOpen" class="fixed inset-0 z-[160] flex items-center justify-center p-4 bg-slate-950/90">
             <div class="bg-white dark:bg-[#1a1a1a] text-slate-900 dark:text-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden border border-slate-200 dark:border-white/10 flex flex-col animate-in zoom-in-95 duration-200">
               <!-- Header -->
               <div class="p-6 flex items-center justify-between border-b border-slate-100 dark:border-white/5">
@@ -2615,7 +2802,7 @@ const highlightSql = (sqlStr: string) => {
     <ClientOnly>
       <Teleport to="body">
         <transition name="modal">
-          <div v-if="isDataGuideModalOpen" class="fixed inset-0 z-[150] flex items-center justify-center p-4 md:p-10 bg-slate-900/80 backdrop-blur-xl">
+          <div v-if="isDataGuideModalOpen" class="fixed inset-0 z-[150] flex items-center justify-center p-4 md:p-10 bg-slate-900/80">
             <div class="bg-white dark:bg-slate-900 rounded-[3rem] shadow-2xl w-full max-w-4xl max-h-[85vh] overflow-hidden flex flex-col border border-slate-200 dark:border-slate-800 animate-in zoom-in-95 duration-300" @click.stop>
               <!-- Modal Header -->
               <div class="p-8 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0 bg-slate-50/50 dark:bg-slate-900/50">
@@ -2673,7 +2860,7 @@ const highlightSql = (sqlStr: string) => {
     <ClientOnly>
       <Teleport to="body">
         <transition name="modal">
-          <div v-if="isCsvConfirmModalOpen" class="fixed inset-0 z-[140] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md">
+          <div v-if="isCsvConfirmModalOpen" class="fixed inset-0 z-[140] flex items-center justify-center p-4 bg-slate-950/90">
             <div class="bg-white dark:bg-[#1a1a1a] text-slate-900 dark:text-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden border border-slate-200 dark:border-white/10 flex flex-col animate-in zoom-in-95 duration-200" @click.stop>
               <!-- Header -->
               <div class="p-6 flex items-center justify-between border-b border-slate-100 dark:border-white/5">
@@ -2784,31 +2971,50 @@ const highlightSql = (sqlStr: string) => {
               </div>
 
               <!-- Footer -->
-              <div v-if="!csvSuccessDone" class="p-6 flex items-center justify-end gap-3 bg-slate-50 dark:bg-white/[0.02]">
+              <div v-if="!csvSuccessDone" class="p-6 flex flex-col gap-3 bg-slate-50 dark:bg-white/[0.02]">
+                <!-- ปุ่มดาวน์โหลดโดยตรง (ไม่บันทึกประวัติ) -->
                 <button
-                  @click="isCsvConfirmModalOpen = false; csvSuccessDone = false"
-                  class="px-7 py-3.5 text-sm font-bold text-slate-500 dark:text-white/50 hover:bg-slate-100 dark:hover:bg-white/5 rounded-xl transition-all border border-slate-200 dark:border-white/10"
+                  @click="downloadDirect"
+                  :disabled="isDirectDownloading || isRequesting"
+                  class="w-full px-8 py-3.5 bg-slate-700 hover:bg-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700 disabled:opacity-50 text-sm font-bold text-white rounded-xl transition-all flex items-center justify-center gap-2 border border-slate-600 dark:border-slate-600"
                 >
-                  ยกเลิก
-                </button>
-                <button
-                  @click="requestApproval(true)"
-                  :disabled="isRequesting"
-                  class="px-8 py-3.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-sm font-bold text-white rounded-xl transition-all shadow-lg shadow-blue-500/20 flex items-center gap-2"
-                >
-                  <RotateCcw v-if="isRequesting" class="w-4 h-4 animate-spin" />
-                  <CheckCircle2 v-else class="w-4 h-4" />
-                  ยืนยัน
-                </button>
-                <button
-                  @click="requestApproval(false)"
-                  :disabled="isRequesting"
-                  class="px-8 py-3.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-sm font-bold text-white rounded-xl transition-all shadow-lg shadow-emerald-500/20 flex items-center gap-2"
-                >
-                  <RotateCcw v-if="isRequesting" class="w-4 h-4 animate-spin" />
+                  <Loader2 v-if="isDirectDownloading" class="w-4 h-4 animate-spin" />
                   <Download v-else class="w-4 h-4" />
-                  ยืนยัน / ดาวน์โหลด
+                  {{ isDirectDownloading ? 'กำลังดาวน์โหลด...' : 'ดาวน์โหลด (ไม่บันทึกประวัติ)' }}
                 </button>
+
+                <div class="flex items-center gap-2 text-[10px] text-slate-400 dark:text-white/30 px-1">
+                  <div class="flex-1 h-px bg-slate-200 dark:bg-white/10"></div>
+                  <span class="uppercase tracking-widest font-bold">หรือบันทึกลงประวัติ</span>
+                  <div class="flex-1 h-px bg-slate-200 dark:bg-white/10"></div>
+                </div>
+
+                <div class="flex items-center justify-end gap-3">
+                  <button
+                    @click="isCsvConfirmModalOpen = false; csvSuccessDone = false"
+                    class="px-7 py-3.5 text-sm font-bold text-slate-500 dark:text-white/50 hover:bg-slate-100 dark:hover:bg-white/5 rounded-xl transition-all border border-slate-200 dark:border-white/10"
+                  >
+                    ยกเลิก
+                  </button>
+                  <button
+                    @click="requestApproval(true)"
+                    :disabled="isRequesting || isDirectDownloading"
+                    class="px-8 py-3.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-sm font-bold text-white rounded-xl transition-all shadow-lg shadow-blue-500/20 flex items-center gap-2"
+                  >
+                    <RotateCcw v-if="isRequesting" class="w-4 h-4 animate-spin" />
+                    <CheckCircle2 v-else class="w-4 h-4" />
+                    ยืนยัน
+                  </button>
+                  <button
+                    @click="requestApproval(false)"
+                    :disabled="isRequesting || isDirectDownloading"
+                    class="px-8 py-3.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-sm font-bold text-white rounded-xl transition-all shadow-lg shadow-emerald-500/20 flex items-center gap-2"
+                  >
+                    <RotateCcw v-if="isRequesting" class="w-4 h-4 animate-spin" />
+                    <Download v-else class="w-4 h-4" />
+                    ยืนยัน / ดาวน์โหลด
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -2820,7 +3026,7 @@ const highlightSql = (sqlStr: string) => {
     <ClientOnly>
       <Teleport to="body">
         <transition name="modal">
-          <div v-if="isDeleteConfirmModalOpen" class="fixed inset-0 z-[140] flex items-center justify-center p-6 bg-slate-900/80 backdrop-blur-md">
+          <div v-if="isDeleteConfirmModalOpen" class="fixed inset-0 z-[140] flex items-center justify-center p-6 bg-slate-900/80">
             <div class="bg-white dark:bg-slate-900 rounded-[2.5rem] shadow-2xl w-full max-w-sm overflow-hidden border border-slate-200 dark:border-slate-800 animate-in zoom-in-95 duration-300" @click.stop>
               <div class="p-8 text-center space-y-6">
                 <div class="w-20 h-20 bg-rose-50 dark:bg-rose-900/20 rounded-full flex items-center justify-center text-rose-500 mx-auto border border-rose-100 dark:border-rose-800/50">
@@ -2859,7 +3065,7 @@ const highlightSql = (sqlStr: string) => {
         <transition name="modal">
           <div
             v-if="isChatModalOpen"
-            class="fixed inset-0 z-[160] flex items-center justify-center bg-slate-950/90 backdrop-blur-md"
+            class="fixed inset-0 z-[160] flex items-center justify-center bg-slate-950/90"
             :class="isChatFullscreen ? 'p-0' : 'p-4'"
           >
             <div
@@ -3198,7 +3404,7 @@ const highlightSql = (sqlStr: string) => {
         <Transition name="modal">
           <div
             v-if="isShareEmailModalOpen"
-            class="fixed inset-0 z-[170] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm"
+            class="fixed inset-0 z-[170] flex items-center justify-center p-4 bg-slate-950/80"
             @click.self="isShareEmailModalOpen = false"
           >
             <div class="bg-white dark:bg-slate-900 w-full max-w-md rounded-[2rem] shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden animate-in zoom-in-95 duration-200" @click.stop>
@@ -3305,7 +3511,7 @@ const highlightSql = (sqlStr: string) => {
     <ClientOnly>
       <Teleport to="body">
         <transition name="modal">
-          <div v-if="isTipsModalOpen" class="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-md" @click="isTipsModalOpen = false">
+          <div v-if="isTipsModalOpen" class="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-slate-900/80" @click="isTipsModalOpen = false">
             <div class="bg-white dark:bg-slate-900 rounded-[2rem] shadow-2xl w-full max-w-lg overflow-hidden border border-slate-200 dark:border-slate-800 animate-in zoom-in-95 duration-300" @click.stop>
               <!-- Header -->
               <div class="px-7 py-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-amber-50/40 dark:bg-amber-900/10">

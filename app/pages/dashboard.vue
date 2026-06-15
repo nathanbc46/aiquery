@@ -347,7 +347,7 @@ const goToHistoryFiltered = (ownerName: string) => {
       <Transition name="modal">
         <div
           v-if="activeActivity"
-          class="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-lg"
+          class="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/70"
           @click.self="closeActivityModal"
         >
           <div class="bg-white dark:bg-slate-900 rounded-[2.5rem] shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col border border-slate-200 dark:border-slate-800 animate-in zoom-in-95 duration-200">
