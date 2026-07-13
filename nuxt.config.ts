@@ -3,6 +3,17 @@ export default defineNuxtConfig({
   compatibilityDate: '2026-05-07',
   // Nuxt 4 future features
   future: { compatibilityVersion: 4 },
+  app: {
+    head: {
+      title: 'Vtiger AI Query System',
+      titleTemplate: '%s - Vtiger AI Query System',
+      meta: [
+        { charset: 'utf-8' },
+        { name: 'viewport', content: 'width=device-width, initial-scale=1' },
+        { name: 'description', content: 'ระบบดึงข้อมูลอัจฉริยะด้วย AI สำหรับ Vtiger CRM' }
+      ]
+    }
+  },
   modules: ['@nuxtjs/tailwindcss', '@pinia/nuxt', '@vite-pwa/nuxt', '@nuxtjs/color-mode'],
   css: ['~/assets/css/main.css'],
   colorMode: {
