@@ -34,6 +34,7 @@ import {
   Lightbulb,
   Send,
   MessageSquare,
+  MessageSquarePlus,
   ChevronDown,
   Volume2,
   VolumeX,
@@ -41,7 +42,11 @@ import {
   Square,
   SquareCheck,
   MousePointerClick,
-  Upload
+  Upload,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Zap,
+  FileText
 } from 'lucide-vue-next'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
@@ -89,9 +94,30 @@ const textareaRef = ref<HTMLTextAreaElement | null>(null)
 const generateAbortController = ref<AbortController | null>(null)
 const previewAbortController = ref<AbortController | null>(null)
 const isCancelled = ref(false)
-const useHybridSchema = ref(false)
-const isDebugMode = ref(false)
-const debugInfo = ref<any>(null)
+const reasoningSteps = ref<string[]>([])
+
+// Streaming agentic state
+const liveSteps = ref<Array<{
+  tool: string
+  args: Record<string, unknown>
+  status: 'running' | 'done'
+  stepElapsed?: number
+}>>([])
+const validateResult = ref<{ ok: boolean; count?: number; error?: string; elapsed?: number } | null>(null)
+const sqlReady = ref(false)
+const isFetching = ref(false)
+const editableSql = ref('')
+const isExplanationOpen = ref(false)
+const sqlEditorRef = ref<HTMLTextAreaElement | null>(null)
+const sqlHighlightRef = ref<HTMLPreElement | null>(null)
+
+// Tab state
+const activeTab = ref<1 | 2 | 3>(1)
+const isAnalysisPanelOpen = ref(true)
+const isSqlPanelOpen = ref(true)
+const isResultFullscreen = ref(false)
+const isEditingPromptInTab = ref(false)
+const promptEditBuffer = ref('')
 
 // Direct SQL mode
 const inputMode = ref<'natural' | 'sql'>('natural')
@@ -99,6 +125,22 @@ const directSql = ref('')
 const directSqlError = ref('')
 const sqlFixSuggestion = ref<{ cause: string; fix: string; fixedSql: string | null } | null>(null)
 const isFixingSql = ref(false)
+
+// Current generate mode (loaded from settings)
+const currentGenerateMode = ref<'agentic' | 'static'>('agentic')
+
+// Confirmation modal ก่อน ย้อนกลับ
+const isBackConfirmOpen = ref(false)
+
+// AI Fix สำหรับ Tab 2 SQL Editor (แยกจาก Direct SQL mode)
+const isFixingSqlInTab = ref(false)
+const sqlFixInTabSuggestion = ref<{ cause: string; fix: string; fixedSql: string | null } | null>(null)
+
+// SQL Chat ใน Tab 2
+const isSqlChatOpen = ref(false)
+const sqlChatMessages = ref<{ role: 'user' | 'model'; text: string; updatedSql?: string }[]>([])
+const sqlChatInput = ref('')
+const isSqlChatLoading = ref(false)
 
 // Direct download (no history)
 const isDirectDownloading = ref(false)
@@ -546,6 +588,9 @@ const resetChat = () => {
   chatMessages.value = []
   chatInput.value = ''
   showChatSuggest.value = false
+  sqlChatMessages.value = []
+  sqlChatInput.value = ''
+  isSqlChatOpen.value = false
   isChatSelectMode.value = false
   selectedMsgIdxs.value = new Set()
   chatChartInstances.forEach(inst => { try { inst.destroy() } catch {} })
@@ -807,8 +852,12 @@ const useFavorite = (fav: any) => {
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
   fetchFavorites()
+  try {
+    const res = await $fetch<any>('/api/admin/ai-settings')
+    if (res.success) currentGenerateMode.value = res.settings.generateMode ?? 'agentic'
+  } catch { /* ใช้ default agentic */ }
 })
 
 const { data: systemConfig } = useFetch<any>('/api/system-config')
@@ -820,12 +869,6 @@ watch(systemConfig, (cfg) => {
   if (cfg && !settingsInitialized.value) {
     if (cfg.chatModel && !chatModel.value) {
       chatModel.value = cfg.chatModel
-    }
-    if (cfg.useHybridSchema !== undefined) {
-      useHybridSchema.value = cfg.useHybridSchema
-    }
-    if (cfg.isDebugMode !== undefined) {
-      isDebugMode.value = cfg.isDebugMode
     }
     settingsInitialized.value = true
   }
@@ -1060,11 +1103,33 @@ const handleClarification = () => {
   focusAndEnd()
 }
 
+// กลับไปแก้ไขคำขอ — keep prompt, only clear result
+const backToEdit = () => {
+  generatedResult.value = null
+  liveSteps.value = []
+  validateResult.value = null
+  sqlReady.value = false
+  editableSql.value = ''
+  isExplanationOpen.value = false
+  activeTab.value = 1
+  isAnalysisPanelOpen.value = true
+  isSqlPanelOpen.value = true
+  nextTick(() => textareaRef.value?.focus())
+}
+
 const clearInput = () => {
   prompt.value = ''
   originalPrompt.value = ''
   generatedResult.value = null
-  debugInfo.value = null
+  reasoningSteps.value = []
+  liveSteps.value = []
+  validateResult.value = null
+  sqlReady.value = false
+  editableSql.value = ''
+  isExplanationOpen.value = false
+  activeTab.value = 1
+  isAnalysisPanelOpen.value = true
+  isSqlPanelOpen.value = true
   clearFile()
   if (textareaRef.value) textareaRef.value.focus()
 }
@@ -1094,9 +1159,10 @@ const refineQuestion = () => {
 }
 
 const copySql = async () => {
-  if (!generatedResult.value?.sql) return
+  const sqlSource = editableSql.value || generatedResult.value?.sql
+  if (!sqlSource) return
   try {
-    const textToCopy = formatSql(generatedResult.value.sql)
+    const textToCopy = formatSql(sqlSource)
     
     // Check if clipboard API is available and context is secure
     if (navigator.clipboard && window.isSecureContext) {
@@ -1153,55 +1219,215 @@ const refinePrompt = async () => {
   }
 }
 
-const generateSql = async (isDraft = false) => {
+const toolLabel = (tool: string, args: Record<string, unknown>): string => {
+  switch (tool) {
+    case 'list_tables':      return args.module_hint ? `สำรวจตาราง "${args.module_hint}"` : 'สำรวจตารางในฐานข้อมูล'
+    case 'describe_table':   return `ตรวจสอบโครงสร้าง ${args.table_name}`
+    case 'search_columns':   return `ค้นหา column "${args.keyword}"`
+    case 'list_picklist_values': return `ดึงค่า dropdown (${args.field_name})`
+    case 'sample_data':      return `ดูตัวอย่างข้อมูล ${args.table_name}`
+    default:                 return tool
+  }
+}
+
+const handleStreamEvent = (ev: any) => {
+  switch (ev.type) {
+    case 'step_start':
+      liveSteps.value.push({ tool: ev.tool, args: ev.args ?? {}, status: 'running' })
+      break
+    case 'step_done': {
+      const step = [...liveSteps.value].reverse().find(s => s.tool === ev.tool && s.status === 'running')
+      if (step) { step.status = 'done'; step.stepElapsed = ev.stepElapsed }
+      break
+    }
+    case 'sql_ready':
+      sqlReady.value = true
+      break
+    case 'validated':
+      validateResult.value = { ok: ev.ok, error: ev.error, elapsed: ev.stepElapsed }
+      break
+    case 'clarification':
+      generatedResult.value = { status: 'clarification_needed', explanation: ev.explanation }
+      toast.info('AI มีข้อสงสัย', 'โปรดให้รายละเอียดเพิ่มเติมตามที่ AI แนะนำ')
+      break
+    case 'done':
+      generatedResult.value = {
+        sql: ev.sql,
+        explanation: ev.explanation,
+        previewData: null,
+        previewCount: 0,
+        status: validateResult.value?.ok === false ? 'error' : 'success',
+        dbError: validateResult.value?.ok === false ? validateResult.value.error : null,
+        maxResultsLimit: ev.maxResultsLimit,
+        limitOverridden: ev.limitOverridden,
+        mode: 'agentic'
+      }
+      editableSql.value = formatSql(ev.sql)
+      isExplanationOpen.value = false
+      activeTab.value = 2
+      isAnalysisPanelOpen.value = true
+      isSqlPanelOpen.value = true
+      setTimeout(() => {
+        resultSection.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      }, 100)
+      break
+    case 'error':
+      error.value = ev.message || 'เกิดข้อผิดพลาดในการประมวลผล'
+      break
+  }
+}
+
+// ตรวจว่า SQL ถูกแก้ไขจากต้นฉบับ (ใช้ทั้งกดเองและผ่าน AI Fix)
+const isSqlEditedFromOriginal = computed(() => {
+  if (!generatedResult.value?.sql || !editableSql.value) return false
+  return editableSql.value.trim() !== formatSql(generatedResult.value.sql).trim()
+})
+
+// เรียก AI fix สำหรับ Tab 2
+const fetchSqlFixForTab = async () => {
+  const sqlText = editableSql.value || generatedResult.value?.sql || ''
+  const errorMsg = generatedResult.value?.dbError || ''
+  if (!sqlText || !errorMsg || isFixingSqlInTab.value) return
+  isFixingSqlInTab.value = true
+  sqlFixInTabSuggestion.value = null
+  try {
+    const res = await $fetch<any>('/api/ai-query/fix-sql', {
+      method: 'POST',
+      body: { sql: sqlText, error: errorMsg }
+    })
+    if (res.success && res.suggestion) {
+      sqlFixInTabSuggestion.value = res.suggestion
+    }
+  } catch { /* silent */ }
+  finally { isFixingSqlInTab.value = false }
+}
+
+// Apply AI fix ไปที่ editableSql
+const applyAiFixInTab = () => {
+  if (!sqlFixInTabSuggestion.value?.fixedSql) return
+  editableSql.value = formatSql(sqlFixInTabSuggestion.value.fixedSql)
+  sqlFixInTabSuggestion.value = null
+}
+
+// SQL Chat functions
+const sendSqlChat = async () => {
+  const q = sqlChatInput.value.trim()
+  if (!q || isSqlChatLoading.value) return
+  const sqlText = editableSql.value || generatedResult.value?.sql || ''
+
+  sqlChatMessages.value.push({ role: 'user', text: q })
+  sqlChatInput.value = ''
+  isSqlChatLoading.value = true
+
+  try {
+    const history = sqlChatMessages.value.slice(0, -1).map(m => ({ role: m.role, text: m.text }))
+    const res = await $fetch<any>('/api/ai-query/chat-sql', {
+      method: 'POST',
+      body: {
+        sql: sqlText,
+        error: generatedResult.value?.dbError || '',
+        question: q,
+        messages: history
+      }
+    })
+    sqlChatMessages.value.push({ role: 'model', text: res.reply, updatedSql: res.updatedSql })
+  } catch {
+    sqlChatMessages.value.push({ role: 'model', text: 'เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง' })
+  } finally {
+    isSqlChatLoading.value = false
+  }
+}
+
+const applySqlFromChat = (sql: string) => {
+  editableSql.value = formatSql(sql)
+}
+
+// SQL chat cleared เมื่อมี result ใหม่ (watch หลักอยู่ใน resetChat)
+
+const fetchData = async () => {
+  const sqlToRun = editableSql.value || generatedResult.value?.sql
+  if (!sqlToRun || isFetching.value) return
+  isFetching.value = true
+  try {
+    const response = await $fetch<any>('/api/ai-query/preview', {
+      method: 'POST',
+      body: { query: sqlToRun }
+    })
+    if (response.success) {
+      generatedResult.value.previewData = response.data
+      generatedResult.value.previewCount = response.totalCount
+      generatedResult.value.status = 'success'
+      generatedResult.value.dbError = null
+      showPreview.value = true
+      activeTab.value = 3
+      toast.success('ดึงข้อมูลสำเร็จ', `พบข้อมูล ${(response.totalCount ?? 0).toLocaleString()} รายการ`)
+    } else {
+      generatedResult.value.status = 'error'
+      generatedResult.value.dbError = response.error
+    }
+  } catch (e: any) {
+    generatedResult.value.status = 'error'
+    generatedResult.value.dbError = e?.data?.message || e?.message || 'Database execution failed'
+  } finally {
+    isFetching.value = false
+  }
+}
+
+const generateSql = async () => {
   if (!prompt.value) return
-  
+
   isGenerating.value = true
   isCancelled.value = false
   isOptimized.value = false
   originalSql.value = null
   optimizationExplanation.value = null
   showOriginalSql.value = false
-  generatedResult.value = null // Clear old result immediately
+  generatedResult.value = null
   error.value = null
   showPreview.value = false
-  
+  liveSteps.value = []
+  validateResult.value = null
+  sqlReady.value = false
+  editableSql.value = ''
+  isExplanationOpen.value = false
+  activeTab.value = 1
+  isAnalysisPanelOpen.value = true
+  isSqlPanelOpen.value = true
+
   if (generateAbortController.value) {
     generateAbortController.value.abort()
   }
   generateAbortController.value = new AbortController()
-  
+
   try {
-    const response = await $fetch<any>('/api/ai-query/generate', {
+    const response = await fetch('/api/ai-query/generate-stream', {
       method: 'POST',
-      body: { 
-        prompt: prompt.value,
-        contextData: uploadedData.value,
-        useHybridSchema: useHybridSchema.value,
-        isDebugMode: isDebugMode.value,
-        generateOnly: isDraft
-      },
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: prompt.value, contextData: uploadedData.value }),
       signal: generateAbortController.value.signal
     })
-    
-    if (response.success && (response.status === 'success' || response.status === 'error' || response.status === 'draft')) {
-      generatedResult.value = response
-      debugInfo.value = response.debug || null
-      
-      // ถ้าเป็น Admin หรือ Manager ให้เปิด Preview อัตโนมัติเลย (ยกเว้น Draft)
-      if ((isAdmin.value || user.value?.role === 'manager') && response.status !== 'draft') {
-        showPreview.value = true
+
+    if (!response.ok) {
+      const errData = await response.json().catch(() => ({}))
+      throw new Error(errData.statusMessage || `HTTP ${response.status}`)
+    }
+
+    const reader = response.body!.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const parts = buffer.split('\n\n')
+      buffer = parts.pop() ?? ''
+      for (const part of parts) {
+        const line = part.trim()
+        if (line.startsWith('data: ')) {
+          try { handleStreamEvent(JSON.parse(line.slice(6))) } catch {}
+        }
       }
-      
-      // Auto-scroll to result
-      setTimeout(() => {
-        resultSection.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-      }, 100)
-    } else if (response.status === 'clarification_needed') {
-      generatedResult.value = response
-      toast.info('AI มีข้อสงสัย', 'โปรดให้รายละเอียดเพิ่มเติมตามที่ AI แนะนำ')
-    } else {
-      error.value = response.error || 'ไม่สามารถสร้างคำสั่ง SQL ได้ โปรดลองระบุคำถามใหม่ให้ชัดเจนขึ้น'
     }
   } catch (e: any) {
     if (e.name === 'AbortError') {
@@ -1209,7 +1435,7 @@ const generateSql = async (isDraft = false) => {
       return
     }
     console.error(e)
-    error.value = e.data?.statusMessage || 'เกิดข้อผิดพลาดในการเชื่อมต่อกับ AI หรือ Database ล้มเหลว'
+    error.value = e.message || 'เกิดข้อผิดพลาดในการเชื่อมต่อกับ AI หรือ Database ล้มเหลว'
   } finally {
     isGenerating.value = false
     generateAbortController.value = null
@@ -1408,6 +1634,7 @@ const submitDirectSql = async () => {
       generatedResult.value.previewCount = previewRes.totalCount
       generatedResult.value.dbError = null
       showPreview.value = true
+      activeTab.value = 3
 
       // อัปเดต explanation และ prompt จาก AI
       if (explainRes.success) {
@@ -1479,6 +1706,7 @@ const updateSql = async () => {
       generatedResult.value.status = 'success'
       generatedResult.value.dbError = null
       showPreview.value = true
+      activeTab.value = 3
 
       toast.success('อัปเดตสำเร็จ', 'ระบบอัปเดตข้อมูลตามคำสั่ง SQL ใหม่ของคุณเรียบร้อยแล้ว')
       isEditingSql.value = false
@@ -1520,9 +1748,10 @@ const runDraftQuery = async () => {
       generatedResult.value.previewCount = response.totalCount
       generatedResult.value.status = 'success'
       showPreview.value = true
-      
+      activeTab.value = 3
+
       toast.success('ดึงข้อมูลสำเร็จ', 'ระบบประมวลผลข้อมูลตามคำสั่ง SQL เรียบร้อยแล้ว')
-      
+
       // Auto-scroll to result
       setTimeout(() => {
         resultSection.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -1564,6 +1793,48 @@ const formatSql = (sqlStr: string) => {
   }
 }
 
+const escapeHtml = (str: string) =>
+  str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+
+// Highlight only — no formatting (used for editor overlay where text must match textarea exactly)
+const highlightOnlySql = (sqlStr: string) => {
+  if (!sqlStr) return ''
+  let r = escapeHtml(sqlStr)
+
+  // Step 1: protect string literals so keywords inside strings are not highlighted
+  const strings: string[] = []
+  r = r.replace(/'([^']*)'/g, (m) => { strings.push(m); return `\x01S${strings.length - 1}\x01` })
+
+  // Step 2: highlight keywords using a single combined regex (multi-word listed first → matched before sub-words)
+  // Single-pass means INNER JOIN is matched before JOIN — no double-match / nested token problem
+  const kwList = [
+    'IS NOT NULL', 'IS NULL', 'NOT IN', 'GROUP BY', 'ORDER BY',
+    'LEFT JOIN', 'INNER JOIN', 'RIGHT JOIN', 'CROSS JOIN',
+    'SELECT', 'FROM', 'WHERE', 'JOIN', 'ON', 'LIMIT', 'OFFSET', 'AND', 'OR', 'IN', 'NOT',
+    'COUNT', 'SUM', 'AVG', 'MIN', 'MAX', 'COALESCE', 'IFNULL', 'IF',
+    'AS', 'DISTINCT', 'HAVING', 'BETWEEN', 'LIKE', 'DESC', 'ASC',
+    'CASE', 'WHEN', 'THEN', 'ELSE', 'END', 'NULL', 'TRUE', 'FALSE',
+    'CONCAT', 'DATE', 'NOW', 'YEAR', 'MONTH', 'DAY',
+  ]
+  const kwPattern = new RegExp(`\\b(${kwList.join('|')})\\b`, 'g')
+  r = r.replace(kwPattern, '<span class="sql-hl-kw">$1</span>')
+
+  // Step 3: highlight numbers (not inside strings, not adjacent to alpha)
+  r = r.replace(/(?<![a-zA-Z_])\b(\d+)\b/g, '<span class="sql-hl-num">$1</span>')
+
+  // Step 4: restore string literals with styling
+  r = r.replace(/\x01S(\d+)\x01/g, (_, i) => `<span class="sql-hl-str">${escapeHtml(strings[parseInt(i)])}</span>`)
+
+  return r
+}
+
+const syncHighlightScroll = () => {
+  if (sqlHighlightRef.value && sqlEditorRef.value) {
+    sqlHighlightRef.value.scrollTop = sqlEditorRef.value.scrollTop
+    sqlHighlightRef.value.scrollLeft = sqlEditorRef.value.scrollLeft
+  }
+}
+
 const highlightSql = (sqlStr: string) => {
   if (!sqlStr) return ''
   
@@ -1594,113 +1865,80 @@ const highlightSql = (sqlStr: string) => {
 </script>
 
 <template>
-  <div class="space-y-12 animate-in fade-in slide-in-from-bottom-4 duration-500">
-    <header class="flex flex-col md:flex-row md:items-end justify-between gap-6 border-b border-slate-200 dark:border-slate-800 pb-8 relative z-10">
-      <div class="space-y-3">
-        <div class="flex items-center gap-3">
-          <div class="inline-flex items-center gap-2 px-3 py-1 rounded-xl bg-blue-50/50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 text-[10px] font-black uppercase tracking-[0.2em] border border-blue-100/50 dark:border-blue-800/50 shadow-sm backdrop-blur-md">
-            <Sparkles class="w-3.5 h-3.5 animate-pulse" />
-            AI SQL ENGINE PRO
-          </div>
-          <button
-            @click="fetchDataGuide"
-            class="group flex items-center gap-2 px-3 py-1 rounded-xl bg-indigo-50/50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 text-[10px] font-black uppercase tracking-[0.2em] border border-indigo-100/50 dark:border-indigo-800/50 shadow-sm backdrop-blur-md hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-all active:scale-95"
-          >
-            <Database class="w-3.5 h-3.5 group-hover:scale-110 transition-transform" />
-            สามารถขอข้อมูลอะไรได้บ้าง?
-          </button>
-          <button
-            @click="isTipsModalOpen = true"
-            class="group flex items-center gap-2 px-3 py-1 rounded-xl bg-amber-50/50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 text-[10px] font-black uppercase tracking-[0.2em] border border-amber-100/50 dark:border-amber-800/50 shadow-sm backdrop-blur-md hover:bg-amber-100 dark:hover:bg-amber-900/40 transition-all active:scale-95"
-            title="เทคนิคการถาม AI"
-          >
-            <Lightbulb class="w-3.5 h-3.5 group-hover:rotate-12 transition-transform" />
-            เทคนิคการถาม
-          </button>
-        </div>
-
-        <h2 class="text-3xl md:text-4xl font-black text-slate-900 dark:text-white leading-[1.2] tracking-tight">
-          ดึงข้อมูลด้วย<span class="text-gradient">ภาษาธรรมชาติ</span>
-        </h2>
-        <p class="text-slate-500 dark:text-slate-400 text-lg max-w-2xl leading-relaxed font-medium">
-          เปลี่ยนคำถามภาษาไทยของคุณให้เป็นชุดคำสั่งดึงข้อมูลที่ปลอดภัยจากระบบ Vtiger CRM
-        </p>
-      </div>
+  <div class="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
+    <header class="pb-2">
+      <h2 class="text-2xl md:text-3xl font-black text-slate-900 dark:text-white leading-[1.2] tracking-tight">
+        ดึงข้อมูลด้วย<span class="text-gradient">ภาษาธรรมชาติ</span>
+      </h2>
+      <p class="text-slate-500 dark:text-slate-400 text-sm max-w-2xl leading-relaxed mt-1">
+        เปลี่ยนคำถามภาษาไทยของคุณให้เป็นชุดคำสั่งดึงข้อมูลที่ปลอดภัยจากระบบ Vtiger CRM
+      </p>
     </header>
 
     <!-- Input Box (Action Zone) -->
-    <section class="rounded-[2.5rem] overflow-hidden relative z-10 border border-indigo-100 dark:border-indigo-900/30 bg-slate-100/90 dark:bg-slate-900/90 shadow-2xl">
-      <form @submit.prevent="inputMode === 'sql' ? submitDirectSql() : generateSql()" class="p-8 md:p-10 space-y-6">
+    <section class="rounded-xl overflow-hidden relative z-10 border border-indigo-100 dark:border-indigo-900/30 bg-slate-100/90 dark:bg-slate-900/90 shadow-lg">
+      <form @submit.prevent="inputMode === 'sql' ? submitDirectSql() : generateSql()" class="p-5 md:p-6 space-y-4">
 
-        <!-- Mode Switcher -->
-        <div class="flex items-center gap-1 p-1 bg-slate-200/70 dark:bg-slate-800/70 rounded-2xl w-fit">
+        <!-- แสดงคำขอทันทีทั้งตอน generate และตอน result พร้อม -->
+        <div v-if="isGenerating || (generatedResult && !isGenerating)" class="flex items-center gap-3">
           <button
+            v-if="generatedResult && !isGenerating"
             type="button"
-            @click="inputMode = 'natural'; directSqlError = ''; sqlFixSuggestion = null"
-            :class="inputMode === 'natural'
-              ? 'bg-white dark:bg-slate-700 shadow text-slate-900 dark:text-white'
-              : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'"
-            class="flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-black transition-all uppercase tracking-widest"
+            @click="isBackConfirmOpen = true"
+            class="flex items-center gap-2 px-4 py-2 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs font-black rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 transition-all active:scale-95 shadow-sm shrink-0"
           >
-            <Sparkles class="w-3.5 h-3.5" />
-            ภาษาธรรมชาติ
+            <ArrowRight class="w-3.5 h-3.5 rotate-180" />
+            ย้อนกลับ
           </button>
-          <button
-            type="button"
-            @click="inputMode = 'sql'; directSqlError = ''; sqlFixSuggestion = null"
-            :class="inputMode === 'sql'
-              ? 'bg-white dark:bg-slate-700 shadow text-slate-900 dark:text-white'
-              : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'"
-            class="flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-black transition-all uppercase tracking-widest"
-          >
-            <Terminal class="w-3.5 h-3.5" />
-            SQL โดยตรง
-          </button>
+          <span class="text-[11px] text-slate-400 font-medium truncate max-w-lg">{{ prompt }}</span>
         </div>
 
-        <div class="space-y-6">
-          <div class="flex items-center justify-between px-1">
-            <label class="flex items-center gap-3 text-xs font-black text-slate-500 dark:text-slate-400 uppercase tracking-[0.2em]">
-              <div class="w-9 h-9 rounded-xl bg-blue-500/10 flex items-center justify-center">
-                <Search class="w-4.5 h-4.5 text-blue-500" />
-              </div>
-              <div class="flex flex-col sm:flex-row sm:items-center gap-3">
-                คุณต้องการค้นหาข้อมูลอะไร?
-                <div class="flex items-center gap-2 px-4 py-1.5 bg-blue-50 dark:bg-blue-900/30 text-[11px] text-blue-700 dark:text-blue-300 font-black rounded-xl border-2 border-blue-100 dark:border-blue-800/50 shadow-sm animate-in fade-in zoom-in duration-700">
-                  <ShieldCheck class="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                  <span class="tracking-tight uppercase opacity-60 mr-1 font-black">Security Policy:</span>
-                  <span>จำกัดการดึงข้อมูลสูงสุด {{ (systemConfig?.maxResultsLimit || 0).toLocaleString() }} รายการ (ระบุจำนวนที่ต้องการในคำถามได้)</span>
-                </div>
-              </div>
-            </label>
-            <div v-if="isGenerating" class="flex items-center gap-2.5 text-xs font-black text-blue-600 dark:text-blue-400">
-              <div class="relative">
-                <BrainCircuit class="w-5 h-5 animate-pulse" />
-                <div class="absolute -top-1 -right-1 w-2 h-2 bg-blue-500 rounded-full animate-ping"></div>
-              </div>
-              <span class="uppercase tracking-widest">AI กำลังประมวลผล...</span>
+        <!-- Form Content — ซ่อนเมื่อกำลัง generate หรือ result พร้อมแล้ว -->
+        <div v-show="!isGenerating && !generatedResult" class="space-y-4">
+
+        <!-- Row 1: Mode Switcher + Label + Security Policy (same row) -->
+        <div class="flex items-center gap-3 flex-wrap">
+          <!-- Mode Switcher -->
+          <div class="flex items-center gap-1 p-1 bg-slate-200/70 dark:bg-slate-800/70 rounded-2xl shrink-0">
+            <button
+              type="button"
+              @click="inputMode = 'natural'; directSqlError = ''; sqlFixSuggestion = null"
+              :class="inputMode === 'natural'
+                ? 'bg-white dark:bg-slate-700 shadow text-slate-900 dark:text-white'
+                : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'"
+              class="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all uppercase tracking-widest"
+            >
+              <Sparkles class="w-3.5 h-3.5" />
+              ภาษาธรรมชาติ
+            </button>
+            <button
+              type="button"
+              @click="inputMode = 'sql'; directSqlError = ''; sqlFixSuggestion = null"
+              :class="inputMode === 'sql'
+                ? 'bg-white dark:bg-slate-700 shadow text-slate-900 dark:text-white'
+                : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'"
+              class="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all uppercase tracking-widest"
+            >
+              <Terminal class="w-3.5 h-3.5" />
+              SQL โดยตรง
+            </button>
+          </div>
+
+          <!-- Label + Security Policy -->
+          <div class="flex flex-wrap items-center gap-2 text-xs font-black text-slate-500 dark:text-slate-400">
+            <div class="flex items-center gap-2">
+              <Search class="w-3.5 h-3.5 text-blue-500 shrink-0" />
+              <span class="uppercase tracking-[0.15em]">คุณต้องการค้นหาข้อมูลอะไร?</span>
             </div>
-            
-            <!-- Hybrid Schema & Debug Toggle -->
-            <div class="flex items-center gap-4 bg-white/40 dark:bg-slate-800/40 px-4 py-2 rounded-2xl border border-white/50 dark:border-slate-700/50 backdrop-blur-md shadow-sm">
-              <label class="flex items-center gap-2 cursor-pointer group" title="เปิดเพื่อเลือกเฉพาะตารางที่เกี่ยวข้อง (ประหยัด Token และ AI โฟกัสดีขึ้น)">
-                <div class="relative inline-flex items-center cursor-pointer">
-                  <input type="checkbox" v-model="useHybridSchema" class="sr-only peer">
-                  <div class="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
-                </div>
-                <span class="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider group-hover:text-blue-500 transition-colors">Hybrid Schema</span>
-              </label>
-              <div class="w-px h-3 bg-slate-300 dark:bg-slate-600"></div>
-              <label class="flex items-center gap-2 cursor-pointer group" title="เปิดเพื่อดูข้อมูลตารางที่ AI นำไปใช้ประมวลผล">
-                <div class="relative inline-flex items-center cursor-pointer">
-                  <input type="checkbox" v-model="isDebugMode" class="sr-only peer">
-                  <div class="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
-                </div>
-                <span class="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider group-hover:text-indigo-500 transition-colors">Debug Mode</span>
-              </label>
+            <div class="flex items-center gap-1.5 px-3 py-1 bg-blue-50 dark:bg-blue-900/30 text-[10px] text-blue-700 dark:text-blue-300 font-black rounded-lg border border-blue-100 dark:border-blue-800/50">
+              <ShieldCheck class="w-3 h-3 text-blue-600 dark:text-blue-400 shrink-0" />
+              <span class="opacity-60 uppercase mr-0.5">Security Policy:</span>
+              <span>จำกัดสูงสุด {{ (systemConfig?.maxResultsLimit || 0).toLocaleString() }} รายการ</span>
             </div>
           </div>
-          
+        </div>
+
+        <div class="space-y-4">
           <div class="relative group">
             <!-- Natural Language Input -->
             <textarea
@@ -1858,7 +2096,7 @@ const highlightSql = (sqlStr: string) => {
               type="button"
               @click="useSuggestion(text)"
               :disabled="isGenerating"
-              class="text-[12px] font-bold px-5 py-3 rounded-xl bg-white/50 dark:bg-slate-800/50 text-slate-600 dark:text-slate-300 hover:bg-blue-600 hover:text-white dark:hover:bg-blue-600 dark:hover:text-white transition-all active:scale-95 border border-slate-200/50 dark:border-slate-700/50 shadow-sm backdrop-blur-sm disabled:opacity-30 disabled:cursor-not-allowed"
+              class="text-[12px] font-bold px-4 py-2.5 rounded-xl bg-white dark:bg-slate-800/60 text-amber-700 dark:text-amber-300 hover:bg-amber-500 hover:text-white dark:hover:bg-amber-500 dark:hover:text-white transition-all active:scale-95 border border-amber-200 dark:border-amber-800/50 shadow-sm disabled:opacity-30 disabled:cursor-not-allowed"
             >
               {{ text }}
             </button>
@@ -1891,8 +2129,17 @@ const highlightSql = (sqlStr: string) => {
             </div>
           </div>
           
-          <div class="flex flex-wrap items-center justify-end gap-3 shrink-0">
+          <div class="flex flex-wrap items-center justify-end gap-2 shrink-0">
 
+            <!-- Utility buttons -->
+            <button
+              @click="isTipsModalOpen = true"
+              type="button"
+              class="flex items-center gap-1.5 px-3 py-2 text-amber-600 dark:text-amber-400 text-xs font-bold hover:text-amber-800 dark:hover:text-amber-200 transition-colors"
+            >
+              <Lightbulb class="w-3.5 h-3.5" />
+              เทคนิคการถาม
+            </button>
             <!-- Natural Language Mode Buttons -->
             <template v-if="inputMode === 'natural'">
               <button
@@ -1908,18 +2155,6 @@ const highlightSql = (sqlStr: string) => {
 
               <button
                 v-if="!isGenerating"
-                type="button"
-                @click="generateSql(true)"
-                :disabled="!prompt"
-                class="px-8 py-5 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-black rounded-[2rem] shadow-sm hover:bg-slate-50 dark:hover:bg-slate-700 transition-all flex items-center justify-center gap-3 active:scale-95 shrink-0 uppercase tracking-widest text-sm border border-slate-200 dark:border-slate-700"
-                title="สร้างเฉพาะคำสั่ง SQL โดยยังไม่รัน Query"
-              >
-                <Wand2 class="w-6 h-6" />
-                สร้าง SQL (ดราฟต์)
-              </button>
-
-              <button
-                v-if="!isGenerating"
                 ref="submitBtnRef"
                 type="submit"
                 :disabled="!prompt"
@@ -1927,11 +2162,10 @@ const highlightSql = (sqlStr: string) => {
               >
                 <div class="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -translate-x-full group-hover:animate-shimmer"></div>
                 <div class="flex items-center gap-2">
-                  <Database class="w-6 h-6 group-hover:scale-110 transition-transform" />
+                  <Sparkles class="w-6 h-6 group-hover:scale-110 transition-transform" />
                 </div>
-                ประมวลผลทันที
+                สร้างคำสั่ง SQL
               </button>
-
               <button
                 v-else
                 type="button"
@@ -1943,6 +2177,15 @@ const highlightSql = (sqlStr: string) => {
                 <Loader2 class="w-5 h-5 relative z-10 animate-spin" />
                 <span class="relative z-10">กำลังประมวลผล... (กดเพื่อหยุด)</span>
               </button>
+              <!-- Mode badge -->
+              <div class="flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest"
+                :class="currentGenerateMode === 'agentic'
+                  ? 'bg-violet-100 dark:bg-violet-900/30 text-violet-600 dark:text-violet-400'
+                  : 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'">
+                <Zap v-if="currentGenerateMode === 'agentic'" class="w-2.5 h-2.5" />
+                <FileText v-else class="w-2.5 h-2.5" />
+                {{ currentGenerateMode === 'agentic' ? 'Agentic' : 'Static' }}
+              </div>
             </template>
 
             <!-- Direct SQL Mode Buttons -->
@@ -2055,467 +2298,483 @@ const highlightSql = (sqlStr: string) => {
           </div>
         </transition>
         
-        <!-- Debug Info Alert -->
-        <transition name="fade">
-          <div v-if="debugInfo" class="mt-4 p-4 bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-2xl animate-in slide-in-from-top-2 duration-300">
-            <div class="flex items-center justify-between mb-3">
-              <div class="flex items-center gap-2">
-                <Terminal class="w-4 h-4 text-indigo-500" />
-                <span class="text-[10px] font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-[0.2em]">Debug: Schema Context Selected</span>
-              </div>
-              <button @click="debugInfo = null" class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors">
-                <X class="w-3.5 h-3.5" />
-              </button>
-            </div>
-            <div class="flex flex-wrap gap-2">
-              <span 
-                v-for="table in debugInfo.selectedTables" 
-                :key="table"
-                class="px-2 py-1 bg-white dark:bg-slate-900 text-[10px] font-mono text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700 rounded-md"
-              >
-                {{ table }}
-              </span>
-              <span v-if="debugInfo.isHybrid" class="px-2 py-1 bg-blue-50 dark:bg-blue-900/30 text-[10px] font-black text-blue-600 dark:text-blue-400 rounded-md border border-blue-100 dark:border-blue-800/50">
-                HYBRID ACTIVE ({{ debugInfo.reductionPercentage }}% reduced)
-              </span>
-            </div>
-            <div class="mt-2 text-[9px] text-slate-400 italic">
-              * ข้อมูลที่แสดงคือตารางที่ AI ใช้ในการพิจารณาสร้าง SQL สำหรับคำถามนี้
-            </div>
-          </div>
-        </transition>
+        </div><!-- end form content wrapper -->
 
       </form>
     </section>
 
-    <!-- AI Output Area (Loading or Result) -->
-    <div class="grid grid-cols-1 grid-rows-1 mt-12">
-      <transition name="fade">
-        <!-- Skeleton Loading State (Detailed & Colorful) -->
-        <div v-if="isGenerating" key="skeleton" class="col-start-1 row-start-1 space-y-6 animate-pulse">
-          <div class="rounded-[2.5rem] overflow-hidden border border-slate-200/60 dark:border-slate-800/60 shadow-xl bg-white/50 dark:bg-slate-950/50 backdrop-blur-sm">
-            <!-- Header Skeleton -->
-            <div class="flex flex-col md:flex-row divide-y md:divide-y-0 md:divide-x divide-slate-100 dark:divide-slate-800 border-b border-slate-100 dark:border-slate-800">
-              <div class="flex-1 p-8 space-y-5">
-                <div class="flex items-center gap-2">
-                  <div class="w-4 h-4 bg-blue-200 dark:bg-blue-900/40 rounded-md"></div>
-                  <div class="h-3 w-32 bg-slate-200 dark:bg-slate-800 rounded-lg"></div>
-                </div>
-                <div class="space-y-3">
-                  <div class="h-5 w-full bg-slate-100 dark:bg-slate-900 rounded-xl"></div>
-                  <div class="h-5 w-4/5 bg-slate-100 dark:bg-slate-900 rounded-xl"></div>
-                  <div class="h-5 w-2/3 bg-slate-100 dark:bg-slate-900 rounded-xl opacity-50"></div>
-                </div>
-              </div>
-              <div class="md:w-56 p-8 flex flex-col justify-center items-center gap-3 bg-slate-50/30 dark:bg-slate-900/10">
-                <div class="h-3 w-20 bg-slate-200 dark:bg-slate-800 rounded-lg"></div>
-                <div class="h-16 w-32 bg-indigo-100 dark:bg-indigo-900/40 rounded-3xl border border-indigo-200/50 dark:border-indigo-800/50"></div>
-                <div class="h-3 w-24 bg-blue-100 dark:bg-blue-900/40 rounded-lg"></div>
-              </div>
-            </div>
-            
-            <!-- Footer Skeleton -->
-            <div class="p-8 bg-slate-50/50 dark:bg-slate-900/50 flex flex-col md:flex-row justify-between items-center gap-6">
-              <div class="flex items-center gap-4">
-                <div class="w-12 h-12 bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm"></div>
-                <div class="space-y-2">
-                  <div class="h-3 w-32 bg-slate-300 dark:bg-slate-700 rounded-lg"></div>
-                  <div class="h-2.5 w-48 bg-slate-200 dark:bg-slate-800 rounded-lg"></div>
-                </div>
-              </div>
-              <div class="flex gap-4 w-full md:w-auto">
-                <div class="h-14 flex-1 md:w-28 bg-slate-200 dark:bg-slate-800 rounded-2xl"></div>
-                <div class="h-14 flex-1 md:w-48 bg-blue-500/20 dark:bg-blue-600/20 rounded-3xl border border-blue-500/20 dark:border-blue-500/10"></div>
-              </div>
-            </div>
+    <!-- Tabbed Result Container -->
+    <div v-if="isGenerating || liveSteps.length || generatedResult" ref="resultSection"
+         :class="isResultFullscreen
+           ? 'result-fullscreen fixed inset-0 z-50 flex flex-col bg-white dark:bg-slate-950 overflow-hidden'
+           : 'rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 shadow-md overflow-hidden'">
+
+      <!-- Fullscreen prompt bar — บนสุด เหนือ Tab Bar -->
+      <div v-if="isResultFullscreen && generatedResult && !isGenerating"
+           class="flex items-center gap-3 px-4 py-2.5 bg-slate-50 dark:bg-slate-900/80 border-b border-slate-200 dark:border-slate-800 shrink-0">
+        <button
+          type="button"
+          @click="isBackConfirmOpen = true"
+          class="flex items-center gap-2 px-3 py-1.5 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs font-black rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 transition-all active:scale-95 shadow-sm shrink-0"
+        >
+          <ArrowRight class="w-3.5 h-3.5 rotate-180" />
+          ย้อนกลับ
+        </button>
+        <span class="text-[11px] text-slate-400 font-medium truncate">"{{ prompt }}"</span>
+      </div>
+
+      <!-- Tab Bar -->
+      <div class="flex border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/70">
+        <button @click="activeTab = 1"
+          :class="activeTab === 1
+            ? 'border-b-2 border-blue-600 text-blue-700 dark:text-blue-400 bg-white dark:bg-slate-950'
+            : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'"
+          class="flex items-center gap-2 px-5 py-3 text-xs font-black uppercase tracking-wider transition-all">
+          <Loader2 v-if="isGenerating" class="w-3.5 h-3.5 animate-spin text-blue-500" />
+          <CheckCircle2 v-else-if="generatedResult" class="w-3.5 h-3.5 text-emerald-500" />
+          <BrainCircuit v-else class="w-3.5 h-3.5" />
+          กำลังสร้าง SQL
+        </button>
+
+        <button @click="generatedResult && (activeTab = 2)"
+          :disabled="!generatedResult"
+          :class="activeTab === 2
+            ? 'border-b-2 border-blue-600 text-blue-700 dark:text-blue-400 bg-white dark:bg-slate-950'
+            : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 disabled:opacity-30 disabled:cursor-not-allowed'"
+          class="flex items-center gap-2 px-5 py-3 text-xs font-black uppercase tracking-wider transition-all">
+          <Terminal class="w-3.5 h-3.5" />
+          ตรวจสอบ SQL
+        </button>
+
+        <button @click="generatedResult?.previewData && (activeTab = 3)"
+          :disabled="!generatedResult?.previewData"
+          :class="activeTab === 3
+            ? 'border-b-2 border-blue-600 text-blue-700 dark:text-blue-400 bg-white dark:bg-slate-950'
+            : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 disabled:opacity-30 disabled:cursor-not-allowed'"
+          class="flex items-center gap-2 px-5 py-3 text-xs font-black uppercase tracking-wider transition-all">
+          <Database class="w-3.5 h-3.5" />
+          ผลลัพธ์
+          <span v-if="generatedResult?.previewData"
+            class="px-1.5 py-0.5 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded text-[9px] font-black">
+            {{ generatedResult.previewCount.toLocaleString() }}
+          </span>
+        </button>
+
+        <!-- Fullscreen toggle -->
+        <button
+          @click="isResultFullscreen = !isResultFullscreen"
+          class="ml-auto mr-2 my-auto p-2 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all"
+          :title="isResultFullscreen ? 'ย่อขนาด' : 'ขยายเต็มจอ'"
+        >
+          <Maximize2 v-if="!isResultFullscreen" class="w-4 h-4" />
+          <Minimize2 v-else class="w-4 h-4" />
+        </button>
+      </div>
+
+      <!-- ── Tab 1: Live Generation ── -->
+      <div v-show="activeTab === 1" class="p-4 space-y-1.5">
+        <div class="flex items-center gap-2 mb-2">
+          <BrainCircuit class="w-4 h-4 text-indigo-500 shrink-0" />
+          <span class="text-[10px] font-black text-indigo-700 dark:text-indigo-400 uppercase tracking-[0.2em]">
+            AI กำลังสำรวจฐานข้อมูล
+          </span>
+        </div>
+        <!-- prompt box -->
+        <div v-if="!isEditingPromptInTab"
+             @click="isEditingPromptInTab = true; promptEditBuffer = prompt"
+             class="cursor-text px-3 py-2 bg-slate-50 dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 hover:border-blue-400 dark:hover:border-blue-500 text-sm text-slate-600 dark:text-slate-300 font-medium leading-snug transition-colors group flex items-start gap-2"
+             title="คลิกเพื่อแก้ไขคำขอ">
+          <span class="flex-1 line-clamp-2">"{{ prompt }}"</span>
+          <Edit3 class="w-3.5 h-3.5 text-slate-400 group-hover:text-blue-500 shrink-0 mt-0.5 transition-colors" />
+        </div>
+        <div v-else class="space-y-2">
+          <textarea
+            v-model="promptEditBuffer"
+            class="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 rounded-lg border border-blue-400 dark:border-blue-500 text-sm text-slate-700 dark:text-slate-200 font-medium leading-snug focus:outline-none focus:ring-2 focus:ring-blue-500/20 resize-none min-h-[60px]"
+            @keydown.enter.exact.prevent="prompt = promptEditBuffer; isEditingPromptInTab = false; generateSql()"
+            autofocus
+          ></textarea>
+          <div class="flex items-center gap-2">
+            <button
+              type="button"
+              @click="prompt = promptEditBuffer; isEditingPromptInTab = false; generateSql()"
+              :disabled="!promptEditBuffer.trim() || isGenerating"
+              class="flex items-center gap-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-black rounded-xl transition-all active:scale-95 uppercase tracking-widest"
+            >
+              <Sparkles class="w-3.5 h-3.5" />
+              ส่งคำขอเพื่อสร้างคำสั่ง SQL ใหม่
+            </button>
+            <button
+              type="button"
+              @click="isEditingPromptInTab = false; promptEditBuffer = ''"
+              class="px-3 py-2 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 text-xs font-bold transition-colors"
+            >
+              ยกเลิก
+            </button>
           </div>
         </div>
-
-        <!-- AI Output & Preview (Result Zone) -->
-        <div v-else-if="generatedResult && (generatedResult.status === 'success' || generatedResult.status === 'error' || generatedResult.status === 'draft')" key="result" ref="resultSection" class="col-start-1 row-start-1 animate-in fade-in slide-in-from-bottom-1 duration-200">
-          <!-- Background Glow Effect (Subtle) -->
-          <div class="absolute -inset-4 bg-gradient-to-tr from-blue-500/10 via-indigo-500/5 to-purple-500/10 blur-2xl -z-10 opacity-60"></div>
-          
-          <div class="rounded-[2.5rem] overflow-hidden border-2 border-white dark:border-slate-800 shadow-[0_32px_64px_-12px_rgba(0,0,0,0.14)] relative z-10 bg-white/95 dark:bg-slate-950/95 backdrop-blur-2xl ring-1 ring-blue-500/20">
-            <!-- Top Accent Gradient Line -->
-            <div class="h-1.5 w-full bg-gradient-to-r from-blue-600 via-indigo-500 to-purple-600"></div>
-          <div class="flex flex-col md:flex-row divide-y md:divide-y-0 md:divide-x divide-slate-200 dark:divide-slate-800 border-b border-slate-200 dark:border-slate-800">
-            <div class="flex-1 p-8 bg-slate-50/30 dark:bg-slate-900/20 relative group/summary">
-              <div class="flex items-center justify-between mb-3">
-                <div class="flex items-center gap-3">
-                  <div class="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.3em] text-slate-500 dark:text-slate-400">
-                    <Wand2 class="w-4 h-4" />
-                    AI Analysis Summary
-                  </div>
-                  <span v-if="generatedResult.modelUsed" class="px-2 py-0.5 bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-md text-[8px] font-mono border border-slate-300 dark:border-slate-700">
-                    {{ generatedResult.modelUsed }}
-                  </span>
-                </div>
-                <div class="flex items-center gap-2">
-                  <button 
-                    @click="copyExplanation"
-                    class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white dark:bg-slate-800 text-slate-500 hover:text-blue-600 dark:hover:text-blue-400 border border-slate-200 dark:border-slate-700 shadow-sm transition-all active:scale-95 text-[10px] font-bold uppercase tracking-wider"
-                    title="คัดลอกคำอธิบาย"
-                  >
-                    <Copy v-if="!isExplanationCopied" class="w-3.5 h-3.5" />
-                    <CheckCircle2 v-else class="w-3.5 h-3.5 text-emerald-500" />
-                    {{ isExplanationCopied ? 'Copied' : 'Copy' }}
-                  </button>
-                  <button 
-                    @click="isSqlModalOpen = true"
-                    class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white dark:bg-slate-800 text-slate-500 hover:text-blue-600 dark:hover:text-blue-400 border border-slate-200 dark:border-slate-700 shadow-sm transition-all active:scale-95 text-[10px] font-bold uppercase tracking-wider"
-                    title="ดูคำสั่ง SQL ที่ใช้ดึงข้อมูล"
-                  >
-                    <Terminal class="w-3.5 h-3.5" />
-                    View SQL
-                  </button>
-                </div>
-              </div>
-              <div class="text-slate-700 dark:text-slate-200 leading-relaxed text-sm font-medium prose prose-slate dark:prose-invert prose-p:my-2 prose-ul:my-2 prose-li:my-1 max-w-none prose-markdown" v-html="renderedExplanation"></div>
-
-              <!-- Optimization Explanation -->
-              <div v-if="isOptimized && optimizationExplanation" class="mt-6 p-5 rounded-2xl bg-indigo-50/50 dark:bg-indigo-900/10 border border-indigo-100 dark:border-indigo-800/30">
-                <div class="flex items-center gap-2 mb-3">
-                  <h4 class="text-xs font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-widest flex items-center gap-2">
-                    <Sparkles class="w-4 h-4" />
-                    การปรับปรุงประสิทธิภาพโดย AI (Auto-Optimized):
-                  </h4>
-                  <span v-if="generatedResult.optimizeModelUsed" class="px-2 py-0.5 bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-400 rounded-md text-[8px] font-mono border border-indigo-200 dark:border-indigo-800">
-                    {{ generatedResult.optimizeModelUsed }}
-                  </span>
-                </div>
-                <div class="prose prose-indigo dark:prose-invert prose-sm max-w-none text-indigo-900 dark:text-indigo-200 prose-markdown">
-                  <div v-html="formatExplanation(optimizationExplanation)"></div>
-                </div>
-              </div>
-            </div>
-            
-            <div class="md:w-56 p-8 bg-slate-50/50 dark:bg-slate-950/50 flex flex-col justify-center items-center text-center">
-              <span class="font-bold text-[10px] uppercase tracking-[0.3em] text-slate-400 mb-2">Total Records</span>
-              <div v-if="generatedResult.status !== 'draft'" class="text-5xl font-black tracking-tighter" :class="generatedResult.previewCount > 0 ? 'text-slate-900 dark:text-white' : 'text-rose-500'">
-                {{ (generatedResult.previewCount ?? 0).toLocaleString() }}
-              </div>
-              <div v-else class="w-12 h-12 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-blue-600 dark:text-blue-400">
-                <Search class="w-6 h-6" />
-              </div>
-              <p class="text-[10px] font-black mt-1 text-blue-600 dark:text-blue-400 uppercase tracking-[0.2em]">
-                {{ generatedResult.status === 'draft' ? 'พร้อมตรวจสอบ' : 'รายการที่พบ' }}
-              </p>
-            </div>
-          </div>
-
-          <!-- Draft SQL Block -->
-          <div v-if="generatedResult.status === 'draft'" class="p-8 bg-blue-50/30 dark:bg-blue-900/10 border-b border-slate-200 dark:border-slate-800">
-            <div class="flex flex-col gap-6">
-              <div class="flex items-start gap-4 text-blue-600 dark:text-blue-400">
-                <div class="p-3 bg-white dark:bg-blue-900/30 rounded-2xl shadow-sm border border-blue-100 dark:border-blue-800 shrink-0">
-                  <Terminal class="w-6 h-6" />
-                </div>
-                <div class="space-y-1 flex-1">
-                  <h5 class="text-sm font-black uppercase tracking-wider">ตรวจสอบและรันคำสั่ง SQL</h5>
-                  <p class="text-xs font-medium leading-relaxed opacity-80">AI ได้สร้างคำสั่ง SQL ดราฟต์ไว้ให้แล้ว คุณสามารถตรวจสอบหรือแก้ไขก่อนรันจริง:</p>
-                  
-                  <div v-if="isOptimized" class="mt-4 grid grid-cols-1 xl:grid-cols-2 gap-4">
-                    <!-- Original SQL -->
-                    <div class="p-5 bg-slate-50 dark:bg-slate-950 rounded-3xl font-mono text-[11px] overflow-x-auto border border-slate-200 dark:border-slate-800 shadow-inner group/origsql relative opacity-70">
-                      <div class="mb-3 text-[9px] font-black uppercase text-slate-500 dark:text-slate-400 tracking-[0.2em] flex justify-between items-center">
-                        <span>Original SQL:</span>
-                        <button @click="revertToOriginalSql" class="text-[9px] font-bold text-amber-600 hover:text-amber-700 bg-amber-50 px-2 py-1 rounded-lg border border-amber-200 flex items-center gap-1 transition-colors">
-                          <RotateCcw class="w-3 h-3"/> กลับไปใช้คำสั่งเดิม
-                        </button>
-                      </div>
-                      <pre class="whitespace-pre-wrap leading-relaxed text-slate-600 dark:text-slate-400"><code class="sql-highlight" v-html="highlightSql(originalSql || '')"></code></pre>
-                    </div>
-
-                    <!-- Optimized SQL -->
-                    <div class="p-5 bg-white dark:bg-slate-900 rounded-3xl font-mono text-[11px] overflow-x-auto border-2 border-indigo-200 dark:border-indigo-800 shadow-sm group/optsql relative">
-                      <div class="mb-3 text-[9px] font-black uppercase text-indigo-500 dark:text-indigo-400 tracking-[0.2em] flex justify-between items-center">
-                        <span class="flex items-center gap-1"><Sparkles class="w-3 h-3"/> Optimized SQL (ใช้อยู่):</span>
-                        <button @click="copySql" class="hover:text-indigo-600 dark:hover:text-indigo-300 transition-colors p-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-900/30">
-                          <Copy class="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                      <pre class="whitespace-pre-wrap leading-relaxed text-slate-800 dark:text-indigo-100"><code class="sql-highlight" v-html="highlightSql(generatedResult.sql)"></code></pre>
-                    </div>
-                  </div>
-                  
-                  <div v-else class="mt-4 p-6 bg-slate-50 dark:bg-slate-950 rounded-3xl font-mono text-[11px] overflow-x-auto border border-blue-100 dark:border-blue-900/30 shadow-inner group/draftsql relative">
-                    <div class="mb-3 text-[9px] font-black uppercase text-blue-500/50 dark:text-blue-400/30 tracking-[0.2em] flex justify-between items-center">
-                      <span>Draft SQL:</span>
-                      <button @click="copySql" class="hover:text-blue-600 dark:hover:text-blue-300 transition-colors p-1.5 rounded-lg bg-blue-100/50 dark:bg-white/5">
-                        <Copy class="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                    <pre class="whitespace-pre-wrap leading-relaxed text-slate-700 dark:text-blue-100"><code class="sql-highlight" v-html="highlightSql(generatedResult.sql)"></code></pre>
-                  </div>
-                </div>
-              </div>
-              
-              <div class="flex flex-col sm:flex-row items-center justify-end gap-4">
-                <button 
-                  @click="optimizeSql"
-                  :disabled="isOptimizing"
-                  class="w-full sm:w-auto px-8 py-4 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 text-xs font-black rounded-2xl border border-indigo-200 dark:border-indigo-800/50 hover:bg-indigo-600 hover:text-white transition-all flex items-center justify-center gap-2 active:scale-95 uppercase tracking-widest disabled:opacity-50"
-                  title="ให้ AI ช่วยปรับปรุง SQL ให้เร็วและมีประสิทธิภาพมากขึ้น"
-                >
-                  <Sparkles v-if="!isOptimizing" class="w-4 h-4" />
-                  <Loader2 v-else class="w-4 h-4 animate-spin" />
-                  Optimize SQL
-                </button>
-                <button 
-                  @click="openManualSqlEditor"
-                  class="w-full sm:w-auto px-8 py-4 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs font-black rounded-2xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 transition-all flex items-center justify-center gap-2 active:scale-95 uppercase tracking-widest"
-                >
-                  <Edit3 class="w-4 h-4" />
-                  แก้ไข SQL
-                </button>
-                <button 
-                  @click="runDraftQuery"
-                  class="w-full sm:w-auto px-12 py-4 text-white text-sm font-black rounded-2xl shadow-xl transition-all flex items-center justify-center gap-2 active:scale-95 uppercase tracking-widest"
-                  :class="isUpdatingSql ? 'bg-rose-600 hover:bg-rose-700 shadow-rose-500/20' : 'bg-blue-600 hover:bg-blue-700 shadow-blue-500/20'"
-                >
-                  <template v-if="isUpdatingSql">
-                    <Loader2 class="w-5 h-5 animate-spin" />
-                    <span class="flex items-center gap-2">กำลังดึงข้อมูล... <span class="text-rose-200 text-xs ml-1">(คลิกเพื่อหยุด)</span></span>
-                  </template>
-                  <template v-else>
-                    <Database class="w-5 h-5" />
-                    รัน Query ทันที
-                  </template>
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <!-- SQL Error Block -->
-          <div v-if="generatedResult.status === 'error'" class="p-8 bg-rose-50/50 dark:bg-rose-900/10 border-b border-slate-200 dark:border-slate-800">
-            <div class="flex flex-col gap-6">
-              <div class="flex items-start gap-4 text-rose-600 dark:text-rose-400">
-                <div class="p-3 bg-white dark:bg-rose-900/30 rounded-2xl shadow-sm border border-rose-100 dark:border-rose-800 shrink-0">
-                  <AlertTriangle class="w-6 h-6" />
-                </div>
-                <div class="space-y-1">
-                  <h5 class="text-sm font-black uppercase tracking-wider">เกิดข้อผิดพลาดในการประมวลผล SQL</h5>
-                  <p class="text-xs font-medium leading-relaxed opacity-80">AI อาจสร้างคำสั่ง SQL ที่ไม่ถูกต้องตามโครงสร้างฐานข้อมูลปัจจุบัน:</p>
-                  <div class="mt-2 space-y-3">
-                    <div class="p-4 bg-rose-100/50 dark:bg-slate-900 rounded-xl font-mono text-[10px] text-rose-700 dark:text-rose-300 overflow-x-auto border border-rose-200 dark:border-rose-900/30">
-                      <div class="mb-2 text-[8px] font-black uppercase text-rose-500/50 tracking-widest">Database Error:</div>
-                      {{ generatedResult.dbError }}
-                    </div>
-                    <div class="p-4 bg-rose-100/50 dark:bg-slate-900 rounded-xl font-mono text-[10px] text-rose-800 dark:text-rose-400 overflow-x-auto border border-rose-200 dark:border-rose-900/30 group/errsql relative">
-                      <div class="mb-2 text-[8px] font-black uppercase text-rose-500/50 tracking-widest flex justify-between items-center">
-                        <span>Attempted SQL Query:</span>
-                        <button @click="copySql" class="hover:text-rose-300 transition-colors">
-                          <Copy class="w-3 h-3" />
-                        </button>
-                      </div>
-                      <pre class="whitespace-pre-wrap leading-relaxed">{{ generatedResult.sql }}</pre>
-                    </div>
-                  </div>
-                </div>
-              </div>
-              
-              <div class="flex flex-col sm:flex-row items-center gap-4">
-                <button 
-                  @click="refineQuestion"
-                  class="w-full sm:w-auto px-8 py-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs font-black rounded-2xl transition-all flex items-center justify-center gap-2 active:scale-95 uppercase tracking-widest border border-slate-200 dark:border-slate-700"
-                >
-                  <Edit3 class="w-4 h-4" />
-                  ปรับปรุงคำถาม
-                </button>
-                <button 
-                  @click="reportError"
-                  :disabled="isReportingError"
-                  class="w-full sm:w-auto px-8 py-4 bg-rose-600 hover:bg-rose-700 text-white text-xs font-black rounded-2xl shadow-xl shadow-rose-500/20 transition-all flex items-center justify-center gap-2 active:scale-95 uppercase tracking-widest"
-                >
-                  <Mail v-if="!isReportingError" class="w-4 h-4" />
-                  <RotateCcw v-else class="w-4 h-4 animate-spin" />
-                  {{ isReportingError ? 'กำลังส่งรายงาน...' : 'รายงานปัญหานี้ให้ Admin' }}
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <!-- Zero Records Warning & Refine Button -->
-          <div v-if="generatedResult.status === 'success' && generatedResult.previewCount === 0" class="p-8 bg-rose-50/50 dark:bg-rose-900/10 border-b border-slate-200 dark:border-slate-800">
-
-            <div class="flex flex-col md:flex-row items-center justify-between gap-6">
-              <div class="flex items-center gap-4 text-rose-600 dark:text-rose-400">
-                <AlertTriangle class="w-6 h-6 shrink-0" />
-                <p class="text-sm font-bold">ไม่พบข้อมูลที่ตรงตามเงื่อนไขที่คุณระบุ โปรดลองปรับปรุงคำถามใหม่อีกครั้ง</p>
-              </div>
-              <button 
-                @click="refineQuestion"
-                class="w-full md:w-auto px-6 py-3 bg-rose-600 hover:bg-rose-700 text-white text-xs font-black rounded-2xl shadow-lg shadow-rose-500/20 transition-all flex items-center justify-center gap-2 active:scale-95 uppercase tracking-widest"
-              >
-                <Edit3 class="w-4 h-4" />
-                ปรับปรุงคำถาม
-              </button>
-            </div>
-          </div>
-
-          <!-- Data Over Limit Warning (Case: Overridden by System) -->
-          <div v-if="generatedResult.limitOverridden" class="mx-8 mt-8 p-5 bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-900/30 rounded-3xl flex items-center gap-4 animate-in fade-in slide-in-from-top-2">
-            <div class="w-12 h-12 rounded-2xl bg-amber-100 dark:bg-amber-900/40 flex items-center justify-center shrink-0">
-              <AlertTriangle class="w-6 h-6 text-amber-600" />
-            </div>
-            <div class="flex-1">
-              <h5 class="text-sm font-black text-amber-900 dark:text-amber-200 uppercase tracking-wider mb-0.5">จำกัดจำนวนการดึงข้อมูล</h5>
-              <p class="text-xs font-medium text-amber-800 dark:text-amber-400 leading-relaxed">
-                เนื่องจากจำนวนที่คุณขอมาเกินกว่าที่ระบบอนุญาต ระบบจึงปรับลดให้เหลือเพียง <b class="text-amber-900 dark:text-amber-100">{{ generatedResult.maxResultsLimit.toLocaleString() }}</b> รายการ ตามนโยบายความปลอดภัยและเพื่อประสิทธิภาพของฐานข้อมูลครับ
-              </p>
-            </div>
-          </div>
-
-          <!-- Data Over Limit Warning (Case: Natural Result > Limit) -->
-          <div v-else-if="generatedResult.previewCount > generatedResult.maxResultsLimit" class="mx-8 mt-8 p-5 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50 rounded-3xl flex items-center gap-4 animate-in fade-in slide-in-from-top-2">
-            <div class="w-12 h-12 rounded-2xl bg-amber-100 dark:bg-amber-900/40 flex items-center justify-center shrink-0">
-              <AlertTriangle class="w-6 h-6 text-amber-600" />
-            </div>
-            <div class="flex-1">
-              <h5 class="text-sm font-black text-amber-900 dark:text-amber-200 uppercase tracking-wider mb-0.5">จำนวนข้อมูลเกินขีดจำกัดที่กำหนด</h5>
-              <p class="text-xs font-medium text-amber-800 dark:text-amber-400 leading-relaxed">
-                พบข้อมูลทั้งหมด <b class="text-amber-900 dark:text-amber-100">{{ generatedResult.previewCount.toLocaleString() }}</b> รายการ 
-                แต่ระบบจะอนุมัติให้ดึงได้เพียง <b class="text-amber-900 dark:text-amber-100">{{ generatedResult.maxResultsLimit.toLocaleString() }}</b> รายการแรกเท่านั้น 
-                ตามนโยบายความปลอดภัยของบริษัท
-              </p>
-            </div>
-          </div>
-
-          <!-- Section 2: Data Preview Table -->
-          <div v-if="generatedResult.previewData" class="p-8 border-b border-slate-200 dark:border-slate-800">
-            <div class="flex items-center justify-between mb-6">
-              <div class="flex items-center gap-3">
-                <div class="w-9 h-9 rounded-xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-500 border border-slate-200 dark:border-slate-700">
-                  <Database class="w-4 h-4" />
-                </div>
-                <div>
-                  <div class="text-[9px] font-black uppercase tracking-[0.3em] text-slate-400 mb-0.5">Data Insights</div>
-                  <h4 class="text-sm font-bold text-slate-900 dark:text-white">ตัวอย่างข้อมูล {{ generatedResult.previewData.length }} รายการแรก</h4>
-                </div>
-              </div>
-              <button 
-                @click="showPreview = !showPreview"
-                class="px-6 py-3 rounded-2xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all flex items-center gap-2 text-sm font-bold text-slate-600 dark:text-slate-300"
-              >
-                <component :is="showPreview ? X : Wand2" class="w-4 h-4" />
-                {{ showPreview ? 'ซ่อนตัวอย่าง' : 'แสดงตัวอย่างข้อมูล' }}
-              </button>
-            </div>
-
-            <transition name="fade">
-              <div v-if="showPreview" class="overflow-x-auto rounded-3xl border border-slate-200 dark:border-slate-800 bg-white/50 dark:bg-slate-950/50 backdrop-blur-sm max-h-[400px] overflow-y-auto custom-scrollbar">
-                <table class="w-full text-left border-collapse">
-                  <thead>
-                    <tr class="bg-slate-50/50 dark:bg-slate-900/50 sticky top-0 z-10 backdrop-blur-md">
-                      <th v-for="(val, key) in generatedResult.previewData[0]" :key="key" class="px-5 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest border-b border-slate-200 dark:border-slate-800">
-                        {{ key }}
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
-                    <tr v-for="(row, idx) in generatedResult.previewData" :key="idx" class="hover:bg-blue-50/30 dark:hover:bg-blue-900/10 transition-colors">
-                      <td v-for="(val, key) in row" :key="key" class="px-5 py-2.5 text-xs font-medium text-slate-700 dark:text-slate-300">
-                        {{ val }}
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </transition>
-          </div>
-
-
-          <!-- Section 4: Action Footer -->
-          <div class="p-8 bg-slate-50/50 dark:bg-slate-900/50 border-t border-slate-200 dark:border-slate-800 flex flex-col lg:flex-row justify-between items-center gap-8">
-            <div class="flex items-center gap-4 w-full lg:w-auto">
-              <div class="w-11 h-11 rounded-xl bg-white dark:bg-slate-800 flex items-center justify-center border border-slate-200 dark:border-slate-700 shadow-sm shrink-0">
-                <ShieldCheck class="w-5 h-5 text-emerald-500" />
-              </div>
-              <div>
-                <p class="text-xs font-black text-slate-900 dark:text-white uppercase tracking-wider">Ready for Approval</p>
-                <p class="text-[11px] text-slate-500 dark:text-slate-400 font-medium">ชุดคำสั่งนี้ปลอดภัยและพร้อมสำหรับการส่งคำขออนุมัติ</p>
-              </div>
-            </div>
-
-            <div class="flex flex-col sm:flex-row items-center gap-6 w-full lg:w-auto">
-              <!-- Secondary Actions Group -->
-              <div class="flex flex-nowrap items-center justify-center gap-3 w-full sm:w-auto">
-                <button @click="generatedResult = null" class="px-4 py-3 text-xs font-black text-slate-400 hover:text-rose-600 transition-all uppercase tracking-widest">
-                  ยกเลิก
-                </button>
-                <button 
-                  @click="refineQuestion"
-                  class="px-5 py-3.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs font-black rounded-2xl transition-all flex items-center justify-center gap-2 active:scale-95 uppercase tracking-widest border border-slate-200 dark:border-slate-700"
-                >
-                  <Edit3 class="w-3.5 h-3.5" />
-                  ปรับปรุงคำถาม
-                </button>
-
-                <button 
-                  @click="isFavoriteModalOpen = true"
-                  class="px-5 py-3.5 bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 hover:bg-amber-500 hover:text-white transition-all border border-amber-200 dark:border-amber-800/50 text-xs font-black rounded-2xl flex items-center justify-center gap-2 active:scale-95 uppercase tracking-widest whitespace-nowrap"
-                >
-                  <Star class="w-3.5 h-3.5" />
-                  บันทึกรายการโปรด
-                </button>
-              </div>
-
-              <!-- Vertical Divider (Hidden on mobile) -->
-              <div class="hidden sm:block w-px h-10 bg-slate-200 dark:bg-slate-800 mx-2"></div>
-
-              <!-- Primary Action Group -->
-              <div class="w-full sm:w-auto flex items-center gap-3">
-                <!-- Chat with AI button (Admin only) -->
-                <button
-                  v-if="isAdmin"
-                  @click="openChatModal"
-                  :disabled="!generatedResult || generatedResult.previewCount === 0"
-                  class="px-5 py-5 bg-violet-600 hover:bg-violet-700 disabled:opacity-40 disabled:grayscale text-white rounded-[2rem] shadow-2xl shadow-violet-500/30 transition-all flex items-center gap-2 active:scale-95"
-                  title="แชตถาม AI จากข้อมูลนี้"
-                >
-                  <MessageSquare class="w-5 h-5" />
-                  <span class="text-xs font-black uppercase tracking-widest">แชต AI</span>
-                </button>
-
-                <div v-if="isAdmin" class="grid grid-cols-2 shadow-2xl shadow-emerald-500/30 rounded-[2rem] overflow-hidden min-w-[240px]">
-                  <button
-                    @click="openCsvModal"
-                    :disabled="isRequesting || generatedResult.previewCount === 0"
-                    class="py-5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:grayscale text-white text-sm font-black transition-all flex items-center justify-center gap-2 active:scale-95 uppercase tracking-widest border-r border-emerald-500/50"
-                  >
-                    <Download class="w-5 h-5" />
-                    <span>CSV</span>
-                  </button>
-                  <button
-                    @click="openZohoModal"
-                    :disabled="isRequesting || generatedResult.previewCount === 0"
-                    class="py-5 bg-emerald-600 hover:bg-emerald-700 text-white transition-all flex items-center justify-center active:scale-95 border-l border-emerald-700/30 group/zoho"
-                    title="Export to Zoho Sheet"
-                  >
-                    <div class="flex items-center gap-2">
-                      <LayoutGrid class="w-5 h-5" />
-                      <span class="text-xs font-black uppercase">Zoho</span>
-                    </div>
-                  </button>
-                </div>
-                
-                <button 
-                  v-else
-                  @click="isRequestModalOpen = true"
-                  :disabled="isRequesting || generatedResult.previewCount === 0"
-                  class="w-full sm:w-auto px-10 py-5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:grayscale text-white text-sm font-black rounded-3xl shadow-2xl shadow-blue-500/30 transition-all flex items-center justify-center gap-3 active:scale-95 uppercase tracking-widest"
-                >
-                  <span>ขออนุมัติดึงข้อมูล</span>
-                </button>
-              </div>
-            </div>
-          </div>
-
+        <!-- steps -->
+        <div v-for="(step, i) in liveSteps" :key="i" class="flex items-center gap-3">
+          <Loader2 v-if="step.status === 'running'" class="w-4 h-4 animate-spin text-blue-500 shrink-0" />
+          <CheckCircle2 v-else class="w-4 h-4 text-emerald-500 shrink-0" />
+          <span class="text-sm text-slate-700 dark:text-slate-300 flex-1">{{ toolLabel(step.tool, step.args) }}</span>
+          <span v-if="step.stepElapsed !== undefined" class="text-[10px] text-slate-400 font-mono">{{ step.stepElapsed }}ms</span>
+        </div>
+        <!-- generating/validating indicators -->
+        <div v-if="isGenerating && sqlReady && !validateResult" class="flex items-center gap-3">
+          <Loader2 class="w-4 h-4 animate-spin text-amber-500 shrink-0" />
+          <span class="text-sm text-slate-500">กำลังตรวจสอบ SQL...</span>
+        </div>
+        <div v-else-if="isGenerating && !sqlReady" class="flex items-center gap-3">
+          <Loader2 class="w-4 h-4 animate-spin text-indigo-500 shrink-0" />
+          <span class="text-sm text-slate-500">กำลังสร้างคำสั่ง SQL...</span>
+        </div>
+        <!-- validate result -->
+        <div v-if="validateResult" class="flex items-center gap-3 mt-1 pt-2 border-t border-slate-200 dark:border-slate-700">
+          <CheckCircle2 v-if="validateResult.ok" class="w-4 h-4 text-emerald-500 shrink-0" />
+          <AlertCircle v-else class="w-4 h-4 text-red-500 shrink-0" />
+          <span class="text-sm flex-1" :class="validateResult.ok ? 'text-emerald-700 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'">
+            {{ validateResult.ok ? 'SQL syntax ถูกต้อง — พร้อมดึงข้อมูล' : `SQL มีข้อผิดพลาด: ${validateResult.error}` }}
+          </span>
+          <span v-if="validateResult.elapsed" class="text-[10px] text-slate-400 font-mono ml-auto">{{ validateResult.elapsed }}ms</span>
         </div>
       </div>
-    </transition>
-  </div>
+
+      <!-- ── Tab 2: AI Analysis + SQL Editor ── -->
+      <div v-show="activeTab === 2" class="tab2-content">
+        <div v-if="generatedResult && (generatedResult.status === 'success' || generatedResult.status === 'error')"
+             class="panel-container flex flex-col md:flex-row divide-y md:divide-y-0 md:divide-x divide-slate-200 dark:divide-slate-800 min-h-[300px]">
+
+          <!-- Left: AI Analysis Summary — ซ่อนได้จริง -->
+          <div v-show="isAnalysisPanelOpen"
+               class="md:flex-1 flex flex-col transition-all duration-200 overflow-hidden border-b md:border-b-0 md:border-r border-slate-200 dark:border-slate-800">
+            <div class="w-full flex items-center justify-between px-3 py-2.5 border-b border-slate-200 dark:border-slate-800 shrink-0">
+              <span class="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.3em] text-slate-500">
+                <Wand2 class="w-3.5 h-3.5" /> AI Analysis Summary
+              </span>
+              <div class="flex items-center gap-2">
+                <button @click="copyExplanation"
+                  class="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-white dark:bg-slate-800 text-slate-500 hover:text-blue-600 border border-slate-200 dark:border-slate-700 text-[10px] font-bold uppercase tracking-wider transition-all active:scale-95">
+                  <Copy v-if="!isExplanationCopied" class="w-3 h-3" />
+                  <CheckCircle2 v-else class="w-3 h-3 text-emerald-500" />
+                  {{ isExplanationCopied ? 'Copied' : 'Copy' }}
+                </button>
+                <button type="button" @click="isAnalysisPanelOpen = false"
+                  class="p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all"
+                  title="ซ่อน AI Analysis">
+                  <PanelLeftClose class="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+            <div class="p-4 flex-1 overflow-y-auto">
+              <div class="text-slate-700 dark:text-slate-200 text-sm leading-relaxed prose prose-slate dark:prose-invert prose-p:my-2 prose-ul:my-2 max-w-none prose-markdown"
+                   v-html="renderedExplanation"></div>
+            </div>
+          </div>
+
+          <!-- Right: SQL Editor -->
+          <div class="sql-panel md:flex-1 flex flex-col transition-all duration-200 overflow-x-hidden">
+            <div class="w-full flex items-center justify-between px-3 py-2.5 border-b border-slate-200 dark:border-slate-800 shrink-0">
+              <div class="flex items-center gap-2">
+                <!-- ปุ่มแสดง AI Analysis เมื่อซ่อนอยู่ -->
+                <button v-if="!isAnalysisPanelOpen"
+                  type="button" @click="isAnalysisPanelOpen = true"
+                  class="flex items-center gap-1.5 px-2 py-1 rounded-lg text-[10px] font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100 transition-all active:scale-95"
+                  title="แสดง AI Analysis Summary">
+                  <PanelLeftOpen class="w-3.5 h-3.5" /> AI Analysis
+                </button>
+                <span class="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.3em] text-slate-500">
+                  <Terminal class="w-3.5 h-3.5" /> SQL Editor
+                </span>
+              </div>
+              <div class="flex items-center gap-2">
+                <!-- Format button — แสดงเมื่อ SQL ถูกแก้ไข -->
+                <button v-if="editableSql && editableSql !== formatSql(generatedResult?.sql || '')"
+                  @click.stop="editableSql = formatSql(editableSql)"
+                  class="px-2 py-1 rounded text-[10px] font-bold text-emerald-600 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100 transition-all active:scale-95 flex items-center gap-1"
+                  title="จัด format SQL">
+                  <LayoutGrid class="w-3 h-3" /> Format
+                </button>
+                <button @click="isSqlChatOpen = !isSqlChatOpen"
+                  class="px-2 py-1 rounded text-[10px] font-bold flex items-center gap-1 border transition-all active:scale-95"
+                  :class="isSqlChatOpen
+                    ? 'text-violet-600 dark:text-violet-400 bg-violet-50 dark:bg-violet-900/20 border-violet-200 dark:border-violet-800'
+                    : 'text-slate-500 bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 hover:text-violet-600'"
+                  title="ถามเกี่ยวกับ SQL นี้">
+                  <MessageSquarePlus class="w-3 h-3" /> แชต
+                </button>
+                <button @click.stop="editableSql = formatSql(generatedResult.sql)"
+                  class="px-2 py-1 rounded text-[10px] font-bold text-amber-600 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 hover:bg-amber-100 transition-all active:scale-95 flex items-center gap-1">
+                  <RotateCcw class="w-3 h-3" /> Reset
+                </button>
+                <button @click.stop="copySql"
+                  class="px-2 py-1 rounded text-[10px] font-bold text-slate-500 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:text-blue-600 transition-all active:scale-95 flex items-center gap-1">
+                  <Copy v-if="!isCopied" class="w-3 h-3" />
+                  <CheckCircle2 v-else class="w-3 h-3 text-emerald-500" />
+                  {{ isCopied ? 'Copied' : 'Copy' }}
+                </button>
+              </div>
+            </div>
+            <div class="sql-panel-content p-3 flex-1">
+              <!-- SQL Error in editor panel -->
+              <div v-if="generatedResult.status === 'error'" class="mb-3 space-y-2">
+                <!-- Error banner + action buttons -->
+                <div class="p-3 bg-rose-50 dark:bg-rose-900/10 border border-rose-200 dark:border-rose-900/30 rounded-lg">
+                  <p class="text-[10px] font-black text-rose-600 dark:text-rose-400 uppercase tracking-widest mb-1">SQL Error</p>
+                  <p class="text-xs font-mono text-rose-700 dark:text-rose-300 break-all">{{ generatedResult.dbError }}</p>
+                  <div class="flex flex-wrap gap-2 mt-2">
+                    <button @click="fetchSqlFixForTab" :disabled="isFixingSqlInTab"
+                      class="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-white text-[10px] font-black rounded-lg transition-all active:scale-95 uppercase tracking-widest">
+                      <Loader2 v-if="isFixingSqlInTab" class="w-3 h-3 animate-spin" />
+                      <Sparkles v-else class="w-3 h-3" />
+                      {{ isFixingSqlInTab ? 'AI กำลังวิเคราะห์...' : 'Fix ด้วย AI' }}
+                    </button>
+                    <button v-if="isSqlEditedFromOriginal" @click="fetchData" :disabled="isFetching"
+                      class="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-[10px] font-black rounded-lg transition-all active:scale-95 uppercase tracking-widest">
+                      <Loader2 v-if="isFetching" class="w-3 h-3 animate-spin" />
+                      <Database v-else class="w-3 h-3" />
+                      {{ isFetching ? 'กำลังดึง...' : 'ดึงข้อมูลอีกครั้ง' }}
+                    </button>
+                  </div>
+                </div>
+                <!-- AI Fix Loading -->
+                <div v-if="isFixingSqlInTab"
+                  class="flex items-center gap-3 px-4 py-3 bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800/40 rounded-lg">
+                  <Loader2 class="w-4 h-4 text-amber-500 animate-spin shrink-0" />
+                  <p class="text-amber-700 dark:text-amber-400 text-xs font-medium">AI กำลังวิเคราะห์ error และแนะนำวิธีแก้ไข...</p>
+                </div>
+                <!-- AI Fix Suggestion -->
+                <div v-if="sqlFixInTabSuggestion && !isFixingSqlInTab"
+                  class="p-4 bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800/40 rounded-lg space-y-3">
+                  <div class="flex items-center gap-2">
+                    <Sparkles class="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                    <p class="text-[10px] font-black text-amber-700 dark:text-amber-400 uppercase tracking-widest">AI แนะนำวิธีแก้ไข</p>
+                  </div>
+                  <div>
+                    <p class="text-[9px] font-black text-amber-600 dark:text-amber-500 uppercase tracking-widest mb-0.5">สาเหตุ</p>
+                    <p class="text-xs text-amber-900 dark:text-amber-200 leading-relaxed">{{ sqlFixInTabSuggestion.cause }}</p>
+                  </div>
+                  <div>
+                    <p class="text-[9px] font-black text-amber-600 dark:text-amber-500 uppercase tracking-widest mb-0.5">วิธีแก้ไข</p>
+                    <p class="text-xs text-amber-900 dark:text-amber-200 leading-relaxed">{{ sqlFixInTabSuggestion.fix }}</p>
+                  </div>
+                  <div v-if="sqlFixInTabSuggestion.fixedSql" class="space-y-2">
+                    <p class="text-[9px] font-black text-amber-600 dark:text-amber-500 uppercase tracking-widest">SQL ที่แก้ไขแล้ว</p>
+                    <div class="bg-slate-950 rounded-lg p-3 font-mono text-xs text-emerald-400 overflow-x-auto max-h-40 overflow-y-auto">
+                      <pre class="whitespace-pre-wrap">{{ sqlFixInTabSuggestion.fixedSql }}</pre>
+                    </div>
+                    <button @click="applyAiFixInTab"
+                      class="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-black rounded-lg transition-all active:scale-95 uppercase tracking-widest">
+                      <CheckCircle2 class="w-3.5 h-3.5" />
+                      Confirm — ใช้ SQL นี้
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <div class="sql-editor-wrap rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 focus-within:ring-2 focus-within:ring-blue-500/40 focus-within:border-blue-400 transition-colors">
+                <pre ref="sqlHighlightRef" aria-hidden="true" class="sql-editor-pre dark:!text-slate-200"
+                     v-html="highlightOnlySql(editableSql)"></pre>
+                <textarea ref="sqlEditorRef" v-model="editableSql" @scroll="syncHighlightScroll"
+                  spellcheck="false" autocomplete="off"
+                  class="sql-editor-textarea focus:outline-none"></textarea>
+              </div>
+
+              <!-- SQL Chat Panel -->
+              <div v-if="isSqlChatOpen" class="mt-3 border border-violet-200 dark:border-violet-800/40 rounded-lg overflow-hidden flex flex-col" style="max-height: 320px;">
+                <!-- Header -->
+                <div class="px-3 py-2 bg-violet-50 dark:bg-violet-900/20 border-b border-violet-200 dark:border-violet-800/40 flex items-center gap-2 shrink-0">
+                  <MessageSquarePlus class="w-3.5 h-3.5 text-violet-500" />
+                  <span class="text-[10px] font-black text-violet-700 dark:text-violet-400 uppercase tracking-widest">ถามเกี่ยวกับ SQL นี้</span>
+                </div>
+                <!-- Messages -->
+                <div class="flex-1 overflow-y-auto p-3 space-y-2 bg-white dark:bg-slate-900 min-h-0">
+                  <div v-if="sqlChatMessages.length === 0" class="text-center text-xs text-slate-400 py-6">
+                    พิมพ์คำถามเกี่ยวกับ SQL นี้ เช่น "ทำไมได้ 0 รายการ?" หรือ "เพิ่ม filter วันที่ด้วย"
+                  </div>
+                  <div v-for="(msg, i) in sqlChatMessages" :key="i" :class="msg.role === 'user' ? 'flex justify-end' : 'flex justify-start'">
+                    <div :class="msg.role === 'user'
+                      ? 'max-w-[80%] px-3 py-2 bg-blue-600 text-white text-xs rounded-2xl rounded-tr-sm'
+                      : 'max-w-[90%] px-3 py-2 bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-xs rounded-2xl rounded-tl-sm space-y-2'">
+                      <p class="whitespace-pre-wrap leading-relaxed">{{ msg.text }}</p>
+                      <div v-if="msg.updatedSql" class="mt-2 space-y-1.5">
+                        <div class="bg-slate-950 rounded-lg p-2 font-mono text-[10px] text-emerald-400 max-h-28 overflow-y-auto">
+                          <pre class="whitespace-pre-wrap">{{ msg.updatedSql }}</pre>
+                        </div>
+                        <button @click="applySqlFromChat(msg.updatedSql!)"
+                          class="flex items-center gap-1 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-black rounded-lg transition-all active:scale-95">
+                          <CheckCircle2 class="w-3 h-3" /> ใช้ SQL นี้
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                  <div v-if="isSqlChatLoading" class="flex justify-start">
+                    <div class="px-3 py-2 bg-slate-100 dark:bg-slate-800 rounded-2xl rounded-tl-sm flex items-center gap-1.5">
+                      <Loader2 class="w-3 h-3 text-violet-500 animate-spin" />
+                      <span class="text-xs text-slate-500">AI กำลังคิด...</span>
+                    </div>
+                  </div>
+                </div>
+                <!-- Input -->
+                <div class="px-3 py-2 border-t border-violet-200 dark:border-violet-800/40 bg-violet-50/50 dark:bg-violet-900/10 flex gap-2 shrink-0">
+                  <textarea v-model="sqlChatInput"
+                    @keydown.enter.exact.prevent="sendSqlChat"
+                    rows="1"
+                    placeholder="ถาม AI เกี่ยวกับ SQL นี้... (Enter ส่ง, Shift+Enter ขึ้นบรรทัด)"
+                    class="flex-1 resize-none bg-white dark:bg-slate-800 border border-violet-200 dark:border-violet-700 rounded-lg px-3 py-1.5 text-xs text-slate-800 dark:text-slate-200 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-400/40"></textarea>
+                  <button @click="sendSqlChat" :disabled="!sqlChatInput.trim() || isSqlChatLoading"
+                    class="px-3 py-1.5 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white text-xs font-black rounded-lg transition-all active:scale-95 shrink-0">
+                    ส่ง
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Warnings row -->
+        <div v-if="generatedResult?.limitOverridden || (generatedResult?.previewCount > generatedResult?.maxResultsLimit)"
+             class="px-4 py-3 border-t border-amber-100 dark:border-amber-900/30 bg-amber-50/50 dark:bg-amber-900/10 flex items-center gap-3 text-xs text-amber-700 dark:text-amber-400">
+          <AlertTriangle class="w-4 h-4 shrink-0" />
+          <span v-if="generatedResult?.limitOverridden">
+            ระบบปรับลดผลลัพธ์เหลือ <b>{{ generatedResult.maxResultsLimit?.toLocaleString() }}</b> รายการตามนโยบาย
+          </span>
+          <span v-else>
+            พบข้อมูล <b>{{ generatedResult?.previewCount?.toLocaleString() }}</b> รายการ แต่จะดึงได้เพียง <b>{{ generatedResult?.maxResultsLimit?.toLocaleString() }}</b> รายการแรก
+          </span>
+        </div>
+
+        <!-- Fetch button footer -->
+        <div v-if="generatedResult?.status === 'success' || (generatedResult?.status === 'error' && isSqlEditedFromOriginal)"
+             class="px-4 py-3 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-900/50">
+          <p class="text-xs text-slate-500 dark:text-slate-400">
+            <CheckCircle2 v-if="validateResult?.ok && generatedResult?.status === 'success'" class="w-3.5 h-3.5 text-emerald-500 inline mr-1" />
+            {{ generatedResult?.status === 'error' ? 'SQL ถูกแก้ไขแล้ว — กดเพื่อทดสอบอีกครั้ง' : 'SQL ผ่านการตรวจสอบ syntax แล้ว — กดเพื่อดูข้อมูลจริง' }}
+          </p>
+          <button @click="fetchData" :disabled="isFetching"
+            class="px-8 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white text-sm font-black rounded-xl shadow-lg shadow-blue-500/20 transition-all flex items-center gap-2 active:scale-95 uppercase tracking-widest">
+            <Loader2 v-if="isFetching" class="w-4 h-4 animate-spin" />
+            <Database v-else class="w-4 h-4" />
+            {{ isFetching ? 'กำลังดึงข้อมูล...' : (generatedResult?.status === 'error' ? 'ดึงข้อมูลอีกครั้ง' : 'ดึงข้อมูล') }}
+          </button>
+        </div>
+      </div>
+
+      <!-- ── Tab 3: Data Preview + Actions ── -->
+      <div v-show="activeTab === 3" v-if="generatedResult">
+        <!-- Total Records row (compact) -->
+        <div v-if="generatedResult.previewData !== null" class="flex items-center gap-4 px-4 py-2.5 border-b border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/50">
+          <span class="font-bold text-[10px] uppercase tracking-[0.3em] text-slate-400">Total Records</span>
+          <div class="text-3xl font-black tracking-tighter" :class="generatedResult.previewCount > 0 ? 'text-slate-900 dark:text-white' : 'text-rose-500'">
+            {{ (generatedResult.previewCount ?? 0).toLocaleString() }}
+          </div>
+          <span class="text-[10px] font-black text-blue-600 dark:text-blue-400 uppercase tracking-[0.2em]">รายการที่พบ</span>
+        </div>
+
+        <!-- Zero Records Warning -->
+        <div v-if="generatedResult.status === 'success' && generatedResult.previewData !== null && generatedResult.previewCount === 0"
+             class="p-4 bg-rose-50/50 dark:bg-rose-900/10 border-b border-slate-200 dark:border-slate-800">
+          <div class="flex items-center gap-4 text-rose-600 dark:text-rose-400">
+            <AlertTriangle class="w-6 h-6 shrink-0" />
+            <p class="text-sm font-bold">ไม่พบข้อมูลที่ตรงตามเงื่อนไขที่คุณระบุ โปรดลองปรับปรุงคำถามใหม่อีกครั้ง</p>
+          </div>
+        </div>
+
+        <!-- Data Preview Table -->
+        <div v-if="generatedResult.previewData" class="p-4 border-b border-slate-200 dark:border-slate-800">
+          <div class="flex items-center justify-between mb-3">
+            <div class="flex items-center gap-3">
+              <div class="w-8 h-8 rounded-xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-500 border border-slate-200 dark:border-slate-700">
+                <Database class="w-4 h-4" />
+              </div>
+              <div>
+                <div class="text-[9px] font-black uppercase tracking-[0.3em] text-slate-400 mb-0.5">Data Insights</div>
+                <h4 class="text-sm font-bold text-slate-900 dark:text-white">ตัวอย่างข้อมูล {{ generatedResult.previewData.length }} รายการแรก</h4>
+              </div>
+            </div>
+            <button @click="showPreview = !showPreview"
+              class="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all flex items-center gap-2 text-sm font-bold text-slate-600 dark:text-slate-300">
+              <component :is="showPreview ? X : Wand2" class="w-4 h-4" />
+              {{ showPreview ? 'ซ่อนตัวอย่าง' : 'แสดงตัวอย่างข้อมูล' }}
+            </button>
+          </div>
+          <transition name="fade">
+            <div v-if="showPreview" class="overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-800 bg-white/50 dark:bg-slate-950/50 backdrop-blur-sm max-h-[400px] overflow-y-auto custom-scrollbar">
+              <table class="w-full text-left border-collapse">
+                <thead>
+                  <tr class="bg-slate-50/50 dark:bg-slate-900/50 sticky top-0 z-10 backdrop-blur-md">
+                    <th v-for="(val, key) in (generatedResult.previewData?.[0] ?? {})" :key="key" class="px-5 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest border-b border-slate-200 dark:border-slate-800">
+                      {{ key }}
+                    </th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
+                  <tr v-for="(row, idx) in generatedResult.previewData" :key="idx" class="hover:bg-blue-50/30 dark:hover:bg-blue-900/10 transition-colors">
+                    <td v-for="(val, key) in row" :key="key" class="px-5 py-2.5 text-xs font-medium text-slate-700 dark:text-slate-300">
+                      {{ val }}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </transition>
+        </div>
+
+        <!-- Action Footer -->
+        <div v-if="generatedResult.previewData" class="p-4 bg-slate-50/50 dark:bg-slate-900/50 border-t border-slate-200 dark:border-slate-800 flex flex-col lg:flex-row justify-between items-center gap-4">
+          <div class="flex items-center gap-4 w-full lg:w-auto">
+            <div class="w-11 h-11 rounded-xl bg-white dark:bg-slate-800 flex items-center justify-center border border-slate-200 dark:border-slate-700 shadow-sm shrink-0">
+              <ShieldCheck class="w-5 h-5 text-emerald-500" />
+            </div>
+            <div>
+              <p class="text-xs font-black text-slate-900 dark:text-white uppercase tracking-wider">Ready for Approval</p>
+              <p class="text-[11px] text-slate-500 dark:text-slate-400 font-medium">ชุดคำสั่งนี้ปลอดภัยและพร้อมสำหรับการส่งคำขออนุมัติ</p>
+            </div>
+          </div>
+
+          <div class="flex flex-col sm:flex-row items-center gap-6 w-full lg:w-auto">
+            <div class="flex flex-nowrap items-center justify-center gap-3 w-full sm:w-auto">
+              <button @click="isBackConfirmOpen = true" class="px-4 py-3 text-xs font-black text-slate-400 hover:text-rose-600 transition-all uppercase tracking-widest">
+                ยกเลิก
+              </button>
+              <button @click="isFavoriteModalOpen = true"
+                class="px-5 py-3.5 bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 hover:bg-amber-500 hover:text-white transition-all border border-amber-200 dark:border-amber-800/50 text-xs font-black rounded-2xl flex items-center justify-center gap-2 active:scale-95 uppercase tracking-widest whitespace-nowrap">
+                <Star class="w-3.5 h-3.5" />
+                บันทึกรายการโปรด
+              </button>
+            </div>
+
+            <div class="hidden sm:block w-px h-10 bg-slate-200 dark:bg-slate-800 mx-2"></div>
+
+            <div class="w-full sm:w-auto flex items-center gap-3">
+              <div v-if="isAdmin" class="grid grid-cols-2 shadow-2xl shadow-emerald-500/30 rounded-[2rem] overflow-hidden min-w-[240px]">
+                <button @click="openCsvModal"
+                  :disabled="isRequesting || generatedResult.previewCount === 0"
+                  class="py-5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:grayscale text-white text-sm font-black transition-all flex items-center justify-center gap-2 active:scale-95 uppercase tracking-widest border-r border-emerald-500/50">
+                  <Download class="w-5 h-5" />
+                  <span>CSV</span>
+                </button>
+                <button @click="openZohoModal"
+                  :disabled="isRequesting || generatedResult.previewCount === 0"
+                  class="py-5 bg-emerald-600 hover:bg-emerald-700 text-white transition-all flex items-center justify-center active:scale-95 border-l border-emerald-700/30"
+                  title="Export to Zoho Sheet">
+                  <div class="flex items-center gap-2">
+                    <LayoutGrid class="w-5 h-5" />
+                    <span class="text-xs font-black uppercase">Zoho</span>
+                  </div>
+                </button>
+              </div>
+
+              <button v-else @click="isRequestModalOpen = true"
+                :disabled="isRequesting || generatedResult.previewCount === 0"
+                class="w-full sm:w-auto px-10 py-5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:grayscale text-white text-sm font-black rounded-3xl shadow-2xl shadow-blue-500/30 transition-all flex items-center justify-center gap-3 active:scale-95 uppercase tracking-widest">
+                <span>ขออนุมัติดึงข้อมูล</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
 
     <!-- Request Approval Modal -->
     <ClientOnly>
@@ -3806,6 +4065,45 @@ const highlightSql = (sqlStr: string) => {
         </transition>
       </Teleport>
     </ClientOnly>
+
+    <!-- Back Confirmation Modal -->
+    <ClientOnly>
+      <Teleport to="body">
+        <transition name="modal">
+          <div v-if="isBackConfirmOpen" class="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-sm" @click="isBackConfirmOpen = false">
+            <div class="bg-white dark:bg-slate-900 rounded-[2rem] shadow-2xl w-full max-w-sm overflow-hidden border border-slate-200 dark:border-slate-800" @click.stop>
+              <!-- Icon -->
+              <div class="flex flex-col items-center gap-4 pt-8 pb-2 px-8">
+                <div class="w-16 h-16 rounded-full bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center">
+                  <AlertTriangle class="w-8 h-8 text-amber-500" />
+                </div>
+                <div class="text-center space-y-1.5">
+                  <h3 class="text-base font-black text-slate-800 dark:text-slate-100">ยืนยันการย้อนกลับ</h3>
+                  <p class="text-sm text-slate-500 dark:text-slate-400 leading-relaxed">
+                    ข้อมูลที่ AI สร้างไว้ทั้งหมด รวมถึง SQL และผลลัพธ์<br>จะถูกล้างออกทั้งหมด ต้องการดำเนินการต่อหรือไม่?
+                  </p>
+                </div>
+              </div>
+              <!-- Actions -->
+              <div class="flex gap-3 px-8 py-6">
+                <button
+                  @click="isBackConfirmOpen = false"
+                  class="flex-1 px-4 py-3 rounded-2xl text-sm font-black text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all active:scale-95"
+                >
+                  ยกเลิก
+                </button>
+                <button
+                  @click="isBackConfirmOpen = false; backToEdit()"
+                  class="flex-1 px-4 py-3 rounded-2xl text-sm font-black text-white bg-gradient-to-r from-rose-500 to-orange-500 hover:from-rose-600 hover:to-orange-600 shadow-lg shadow-rose-500/25 transition-all active:scale-95"
+                >
+                  ย้อนกลับ
+                </button>
+              </div>
+            </div>
+          </div>
+        </transition>
+      </Teleport>
+    </ClientOnly>
   </div>
 </template>
 
@@ -3868,6 +4166,88 @@ const highlightSql = (sqlStr: string) => {
 textarea::placeholder {
   font-weight: 500;
 }
+
+/* ── SQL Editor Overlay ───────────────────────────────── */
+.sql-editor-wrap {
+  position: relative;
+  --sql-font: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+  --sql-size: 0.8125rem;   /* ~13px */
+  --sql-lh: 1.65;
+  --sql-px: 0.75rem;
+  --sql-py: 0.625rem;
+}
+.sql-editor-pre,
+.sql-editor-textarea {
+  font-family: var(--sql-font);
+  font-size: var(--sql-size);
+  line-height: var(--sql-lh);
+  padding: var(--sql-py) var(--sql-px);
+  margin: 0;
+  tab-size: 2;
+  white-space: pre-wrap;
+  word-break: break-word;
+  letter-spacing: 0;
+}
+.sql-editor-pre {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  color: #334155; /* slate-700 — dark mode ควบคุมด้วย Tailwind dark:!text-slate-200 บน element โดยตรง */
+}
+.sql-editor-textarea {
+  position: relative;
+  display: block;
+  width: 100%;
+  min-height: 260px;
+  resize: vertical;
+  background: transparent;
+  color: transparent;
+  caret-color: #334155;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+:global(.dark) .sql-editor-textarea { caret-color: #94a3b8; }
+
+/* ── Fullscreen SQL Editor Height Expansion ─────────────── */
+.result-fullscreen .tab2-content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.result-fullscreen .panel-container {
+  flex: 1;
+  min-height: 0;
+}
+.result-fullscreen .sql-panel {
+  min-height: 0;
+}
+.result-fullscreen .sql-panel-content {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.result-fullscreen .sql-editor-wrap {
+  flex: 1;
+  min-height: 0;
+}
+.result-fullscreen .sql-editor-textarea {
+  height: 100%;
+  min-height: 0 !important;
+  resize: none !important;
+}
+
+/* SQL highlight token colors */
+:global(.sql-hl-kw) { color: #2563eb; font-weight: 700; } /* blue-600 */
+:global(.dark .sql-hl-kw) { color: #93c5fd; font-weight: 700; } /* blue-300 — สว่างขึ้นใน dark mode */
+:global(.sql-hl-str) { color: #16a34a; }                   /* green-600 */
+:global(.dark .sql-hl-str) { color: #86efac; }             /* green-300 */
+:global(.sql-hl-num) { color: #d97706; }                   /* amber-600 */
+:global(.dark .sql-hl-num) { color: #fcd34d; }             /* amber-300 */
 
 /* Data Guide Styling */
 :deep(.data-guide-content h2) {

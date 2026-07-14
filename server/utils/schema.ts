@@ -63,6 +63,9 @@ export const aiSettings = mysqlTable('ai_settings', {
   maxResultsLimit: int('max_results_limit').default(5000),
   useHybridSchema: boolean('use_hybrid_schema').default(false),
   isDebugMode: boolean('is_debug_mode').default(false),
+  customHints: text('custom_hints'),
+  agenticModel: varchar('agentic_model', { length: 100 }).default('gemini-2.5-flash'),
+  generateMode: varchar('generate_mode', { length: 10 }).default('agentic'),
   updatedAt: timestamp('updated_at').defaultNow().onUpdateNow(),
 });
 

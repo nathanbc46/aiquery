@@ -13,7 +13,10 @@ import {
   Link,
   CheckCircle2,
   XCircle,
-  EyeOff
+  EyeOff,
+  Zap,
+  FileText,
+  ChevronDown
 } from 'lucide-vue-next'
 
 definePageMeta({
@@ -23,6 +26,7 @@ definePageMeta({
 const toast = useToast()
 const isLoading = ref(true)
 const isSaving = ref(false)
+const activeTab = ref<'sql'|'agentic'|'refine'|'analyze'|'chat'>('sql')
 
 const settings = ref({
   refineModel: '',
@@ -36,7 +40,10 @@ const settings = ref({
   optimizeModel: '',
   maxResultsLimit: 5000,
   useHybridSchema: false,
-  isDebugMode: false
+  isDebugMode: false,
+  customHints: '',
+  agenticModel: 'gemini-2.5-flash',
+  generateMode: 'agentic' as 'agentic' | 'static'
 })
 
 const availableModels = ref<string[]>([])
@@ -253,385 +260,357 @@ onMounted(() => {
       </button>
     </header>
 
-    <div v-if="isLoading" class="grid grid-cols-1 md:grid-cols-2 gap-8">
-      <div v-for="i in 2" :key="i" class="h-96 bg-slate-100 dark:bg-slate-800/50 rounded-3xl animate-pulse"></div>
-    </div>
+    <div v-if="isLoading" class="h-96 bg-slate-100 dark:bg-slate-800/50 rounded-3xl animate-pulse"></div>
 
-    <div v-else class="grid grid-cols-1 xl:grid-cols-2 gap-8">
-      <!-- Refine Engine Settings -->
-      <section class="bg-white dark:bg-slate-900 rounded-[2rem] border border-slate-200 dark:border-slate-800 overflow-hidden shadow-sm flex flex-col">
-        <div class="p-6 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 flex items-center justify-between">
-          <div class="flex items-center gap-4">
-            <div class="w-10 h-10 rounded-xl bg-indigo-500/10 flex items-center justify-center">
-              <Sparkles class="w-5 h-5 text-indigo-500" />
-            </div>
-            <div>
-              <h3 class="font-bold text-slate-900 dark:text-white">Prompt Refinement</h3>
-              <p class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold tracking-widest">ระบบช่วยขัดเกลาคำถาม</p>
-            </div>
-          </div>
-          <button 
-            @click="restoreRefineDefaults"
-            class="p-2 rounded-lg hover:bg-white dark:hover:bg-slate-800 text-slate-400 hover:text-indigo-600 transition-all"
-            title="คืนค่าเริ่มต้น"
+    <div v-else class="space-y-6">
+      <!-- Tab Bar -->
+      <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-sm">
+        <!-- Tab navigation -->
+        <div class="flex overflow-x-auto border-b border-slate-200 dark:border-slate-800 scrollbar-none">
+          <button v-for="tab in [
+            { key: 'sql',    label: 'SQL Generation',    icon: 'terminal',  color: 'blue'   },
+            { key: 'agentic',label: 'Agentic Mode',      icon: 'zap',       color: 'violet' },
+            { key: 'refine', label: 'Prompt Refinement', icon: 'sparkles',  color: 'indigo' },
+            { key: 'analyze',label: 'Data Analysis',     icon: 'chart',     color: 'violet' },
+            { key: 'chat',   label: 'Data Chatbot',      icon: 'bot',       color: 'teal'   },
+          ]" :key="tab.key"
+            @click="activeTab = tab.key as any"
+            class="flex items-center gap-2 px-5 py-4 text-sm font-bold whitespace-nowrap border-b-2 transition-all shrink-0"
+            :class="activeTab === tab.key
+              ? 'border-blue-600 text-blue-600 dark:text-blue-400 bg-blue-50/50 dark:bg-blue-900/10'
+              : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/50'"
           >
-            <RotateCcw class="w-4 h-4" />
+            <Terminal v-if="tab.icon === 'terminal'" class="w-4 h-4" />
+            <Zap v-else-if="tab.icon === 'zap'" class="w-4 h-4" />
+            <Sparkles v-else-if="tab.icon === 'sparkles'" class="w-4 h-4" />
+            <BarChart3 v-else-if="tab.icon === 'chart'" class="w-4 h-4" />
+            <Bot v-else-if="tab.icon === 'bot'" class="w-4 h-4" />
+            {{ tab.label }}
           </button>
         </div>
-        
-        <div class="p-8 space-y-6 flex-1">
-          <div class="space-y-2">
-            <label class="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
-              AI Model Selection
-            </label>
-            <input 
-              type="text"
-              v-model="settings.refineModel"
-              class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-3 text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all font-medium"
-              placeholder="เช่น gemini-2.0-flash"
-            />
-            <div class="flex flex-wrap gap-2 mt-2 items-center">
-              <span class="text-[10px] text-slate-500 font-bold uppercase tracking-wider">ตัวเลือก:</span>
-              <button
-                v-if="!openModelPickers['refine']"
-                @click="toggleModelPicker('refine')"
-                :disabled="isFetchingModels"
-                class="px-3 py-1 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 text-[10px] rounded-md transition-colors font-bold flex items-center gap-1 border border-indigo-200 dark:border-indigo-800/50"
-              >
-                <RotateCcw v-if="isFetchingModels" class="w-3 h-3 animate-spin" />
-                <Database v-else class="w-3 h-3" />
-                ดึงรายชื่อโมเดลล่าสุด
+
+        <!-- Tab Content -->
+        <div class="p-6 space-y-6">
+
+          <!-- ── Tab: SQL Generation ── -->
+          <div v-show="activeTab === 'sql'" class="space-y-6">
+            <div class="flex items-center justify-between">
+              <div>
+                <h3 class="font-bold text-slate-900 dark:text-white">SQL Generation (Static Mode)</h3>
+                <p class="text-xs text-slate-500 mt-0.5">โมเดลและ Schema ที่ใช้เมื่อเลือกโหมด Static</p>
+              </div>
+              <div class="flex items-center gap-2">
+                <button @click="syncPicklists" :disabled="syncingPicklists"
+                  class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-blue-600 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 hover:bg-blue-100 transition-all"
+                  title="ดึงข้อมูล Picklist จาก Vtiger">
+                  <RotateCcw v-if="syncingPicklists" class="w-3.5 h-3.5 animate-spin" />
+                  <Database v-else class="w-3.5 h-3.5" />
+                  Sync DB
+                </button>
+                <button @click="restoreGenerateDefaults" class="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-blue-600 transition-all" title="คืนค่าเริ่มต้น">
+                  <RotateCcw class="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            <div class="space-y-1.5">
+              <label class="text-[10px] font-black text-slate-400 uppercase tracking-widest">AI Model (Static)</label>
+              <div class="relative">
+                <div class="flex gap-2">
+                  <input :value="settings.generateModel" readonly @click="toggleModelPicker('generate')"
+                    class="flex-1 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-900 dark:text-white cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-400/40 font-medium" />
+                  <button @click="toggleModelPicker('generate')" :disabled="isFetchingModels"
+                    class="px-4 py-2.5 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-bold text-slate-600 dark:text-slate-300 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 flex items-center gap-1.5 transition-all">
+                    <RotateCcw v-if="isFetchingModels" class="w-3.5 h-3.5 animate-spin" />
+                    <RotateCcw v-else class="w-3.5 h-3.5" />
+                    Fetch
+                  </button>
+                </div>
+                <div v-if="openModelPickers['generate'] && availableModels.length"
+                  class="absolute top-full left-0 right-14 z-20 mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl overflow-y-auto max-h-52">
+                  <button v-for="m in availableModels" :key="m"
+                    @click="settings.generateModel = m; openModelPickers['generate'] = false"
+                    class="w-full text-left px-4 py-2.5 text-sm hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors border-b border-slate-100 dark:border-slate-700 last:border-0"
+                    :class="m === settings.generateModel ? 'text-blue-600 font-bold bg-blue-50/50 dark:bg-blue-900/10' : 'text-slate-700 dark:text-slate-300'">
+                    {{ m }}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div class="space-y-1.5">
+              <label class="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center justify-between">
+                Vtiger Schema & Rules <span class="text-blue-500 normal-case font-bold text-[10px]">Database Context</span>
+              </label>
+              <textarea v-model="settings.generateSystemInstruction"
+                class="w-full min-h-[400px] bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl p-4 text-slate-900 dark:text-white font-medium text-xs leading-relaxed focus:ring-2 focus:ring-blue-400/40 focus:border-blue-400 outline-none transition-all resize-y custom-scrollbar"
+                placeholder="ใส่ข้อมูล Schema และเงื่อนไขการสร้าง SQL..."></textarea>
+            </div>
+
+            <div class="pt-4 border-t border-slate-100 dark:border-slate-800 space-y-1.5">
+              <label class="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                Optimize SQL Model <span class="text-rose-500 normal-case font-bold">*สำหรับผู้บริหารและ DBA*</span>
+              </label>
+              <p class="text-[10px] text-slate-500">โมเดลสำหรับปุ่ม Optimize SQL (แนะนำโมเดลรุ่น Pro)</p>
+              <div class="relative">
+                <div class="flex gap-2">
+                  <input :value="settings.optimizeModel" readonly @click="toggleModelPicker('optimize')"
+                    class="flex-1 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-900 dark:text-white cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-400/40 font-medium" />
+                  <button @click="toggleModelPicker('optimize')" :disabled="isFetchingModels"
+                    class="px-4 py-2.5 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-bold text-slate-600 dark:text-slate-300 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 flex items-center gap-1.5 transition-all">
+                    <RotateCcw v-if="isFetchingModels" class="w-3.5 h-3.5 animate-spin" />
+                    <RotateCcw v-else class="w-3.5 h-3.5" />
+                    Fetch
+                  </button>
+                </div>
+                <div v-if="openModelPickers['optimize'] && availableModels.length"
+                  class="absolute top-full left-0 right-14 z-20 mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl overflow-y-auto max-h-52">
+                  <button v-for="m in availableModels" :key="'opt-'+m"
+                    @click="settings.optimizeModel = m; openModelPickers['optimize'] = false"
+                    class="w-full text-left px-4 py-2.5 text-sm hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors border-b border-slate-100 dark:border-slate-700 last:border-0"
+                    :class="m === settings.optimizeModel ? 'text-blue-600 font-bold bg-blue-50/50 dark:bg-blue-900/10' : 'text-slate-700 dark:text-slate-300'">
+                    {{ m }}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ── Tab: Agentic Mode ── -->
+          <div v-show="activeTab === 'agentic'" class="space-y-6">
+            <div class="flex items-center justify-between">
+              <div>
+                <h3 class="font-bold text-slate-900 dark:text-white">Agentic Mode Configuration</h3>
+                <p class="text-xs text-slate-500 mt-0.5">ตั้งค่าโหมดการสร้าง SQL และ Business Rules</p>
+              </div>
+            </div>
+
+            <!-- Mode Selector -->
+            <div class="space-y-2">
+              <label class="text-[10px] font-black text-slate-400 uppercase tracking-widest">Generate Mode</label>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div @click="settings.generateMode = 'agentic'"
+                  class="flex items-center gap-4 p-4 rounded-xl border-2 cursor-pointer transition-all"
+                  :class="settings.generateMode === 'agentic' ? 'border-violet-500 bg-violet-50 dark:bg-violet-900/20' : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:border-slate-300'">
+                  <div class="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
+                    :class="settings.generateMode === 'agentic' ? 'bg-violet-500 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-400'">
+                    <Zap class="w-5 h-5" />
+                  </div>
+                  <div>
+                    <p class="font-bold text-sm text-slate-900 dark:text-white">Agentic Mode</p>
+                    <p class="text-[11px] text-slate-500">AI ค้นหา Schema จาก DB อัตโนมัติด้วย Tool Calling</p>
+                  </div>
+                  <div class="ml-auto w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0"
+                    :class="settings.generateMode === 'agentic' ? 'border-violet-500 bg-violet-500' : 'border-slate-300'">
+                    <div v-if="settings.generateMode === 'agentic'" class="w-1.5 h-1.5 rounded-full bg-white"></div>
+                  </div>
+                </div>
+                <div @click="settings.generateMode = 'static'"
+                  class="flex items-center gap-4 p-4 rounded-xl border-2 cursor-pointer transition-all"
+                  :class="settings.generateMode === 'static' ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20' : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:border-slate-300'">
+                  <div class="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
+                    :class="settings.generateMode === 'static' ? 'bg-blue-500 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-400'">
+                    <FileText class="w-5 h-5" />
+                  </div>
+                  <div>
+                    <p class="font-bold text-sm text-slate-900 dark:text-white">Static Mode</p>
+                    <p class="text-[11px] text-slate-500">ใช้ Schema คงที่จากแท็บ SQL Generation</p>
+                  </div>
+                  <div class="ml-auto w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0"
+                    :class="settings.generateMode === 'static' ? 'border-blue-500 bg-blue-500' : 'border-slate-300'">
+                    <div v-if="settings.generateMode === 'static'" class="w-1.5 h-1.5 rounded-full bg-white"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Agentic Model — แสดงเฉพาะ Agentic mode -->
+            <div v-show="settings.generateMode === 'agentic'" class="space-y-1.5">
+              <label class="text-[10px] font-black text-slate-400 uppercase tracking-widest">AI Model (Agentic)</label>
+              <div class="relative">
+                <div class="flex gap-2">
+                  <input :value="settings.agenticModel" readonly @click="toggleModelPicker('agentic')"
+                    class="flex-1 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-900 dark:text-white cursor-pointer focus:outline-none focus:ring-2 focus:ring-violet-400/40 font-medium" />
+                  <button @click="toggleModelPicker('agentic')" :disabled="isFetchingModels"
+                    class="px-4 py-2.5 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-bold text-slate-600 dark:text-slate-300 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 flex items-center gap-1.5 transition-all">
+                    <RotateCcw v-if="isFetchingModels" class="w-3.5 h-3.5 animate-spin" />
+                    <RotateCcw v-else class="w-3.5 h-3.5" />
+                    Fetch
+                  </button>
+                </div>
+                <div v-if="openModelPickers['agentic'] && availableModels.length"
+                  class="absolute top-full left-0 right-14 z-20 mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl overflow-y-auto max-h-52">
+                  <button v-for="m in availableModels" :key="'ag-'+m"
+                    @click="settings.agenticModel = m; openModelPickers['agentic'] = false"
+                    class="w-full text-left px-4 py-2.5 text-sm hover:bg-violet-50 dark:hover:bg-violet-900/20 transition-colors border-b border-slate-100 dark:border-slate-700 last:border-0"
+                    :class="m === settings.agenticModel ? 'text-violet-600 font-bold bg-violet-50/50 dark:bg-violet-900/10' : 'text-slate-700 dark:text-slate-300'">
+                    {{ m }}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Business Hints — แสดงเฉพาะ Agentic mode -->
+            <div v-show="settings.generateMode === 'agentic'" class="space-y-1.5">
+              <label class="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                Business Hints สำหรับ AI
+              </label>
+              <p class="text-[11px] text-slate-500 flex items-center gap-1.5">
+                <Sparkles class="w-3 h-3 text-violet-400 shrink-0" />
+                ข้อความนี้จะถูกส่งให้ AI เป็น context เพิ่มเติมทุกครั้งที่สร้างคำสั่ง SQL
+              </p>
+              <textarea v-model="settings.customHints" rows="8"
+                placeholder="อธิบาย business rules พิเศษที่ AI ควรรู้ เช่น:&#10;- หมวดหมู่สินค้าที่ผูกกับ Opportunity ให้ใช้ตาราง app_potential_product JOIN vtiger_productcategory ON app_potential_product.productcategory = vtiger_productcategory.productcategory&#10;- ลูกค้า VIP อยู่ใน vtiger_account โดยดูจาก rating = 'Hot'"
+                class="w-full font-mono text-xs bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-3 text-slate-800 dark:text-slate-200 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-400/40 focus:border-violet-400 resize-y custom-scrollbar leading-relaxed"></textarea>
+            </div>
+          </div>
+
+          <!-- ── Tab: Prompt Refinement ── -->
+          <div v-show="activeTab === 'refine'" class="space-y-6">
+            <div class="flex items-center justify-between">
+              <div>
+                <h3 class="font-bold text-slate-900 dark:text-white">Prompt Refinement</h3>
+                <p class="text-xs text-slate-500 mt-0.5">ระบบช่วยขัดเกลาคำถามก่อนสร้าง SQL</p>
+              </div>
+              <button @click="restoreRefineDefaults" class="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-indigo-600 transition-all" title="คืนค่าเริ่มต้น">
+                <RotateCcw class="w-4 h-4" />
               </button>
-              <template v-else>
-                <button
-                  v-for="model in availableModels"
-                  :key="model"
-                  @click="settings.refineModel = model"
-                  class="px-2 py-1 bg-slate-100 hover:bg-indigo-100 dark:bg-slate-800 dark:hover:bg-indigo-900/50 text-slate-600 dark:text-slate-300 text-[10px] rounded-md transition-colors font-medium border border-slate-200 dark:border-slate-700"
-                >
-                  {{ model }}
-                </button>
-                <button
-                  @click="openModelPickers['refine'] = false"
-                  class="px-2 py-1 bg-slate-100 hover:bg-rose-100 dark:bg-slate-800 dark:hover:bg-rose-900/30 text-slate-400 hover:text-rose-500 text-[10px] rounded-md transition-colors font-bold flex items-center gap-1 border border-slate-200 dark:border-slate-700"
-                  title="ซ่อนรายชื่อโมเดล"
-                >
-                  <EyeOff class="w-3 h-3" />
-                  ซ่อน
-                </button>
-              </template>
+            </div>
+
+            <div class="space-y-1.5">
+              <label class="text-[10px] font-black text-slate-400 uppercase tracking-widest">AI Model</label>
+              <div class="relative">
+                <div class="flex gap-2">
+                  <input :value="settings.refineModel" readonly @click="toggleModelPicker('refine')"
+                    class="flex-1 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-900 dark:text-white cursor-pointer focus:outline-none focus:ring-2 focus:ring-indigo-400/40 font-medium" />
+                  <button @click="toggleModelPicker('refine')" :disabled="isFetchingModels"
+                    class="px-4 py-2.5 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-bold text-slate-600 dark:text-slate-300 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 flex items-center gap-1.5 transition-all">
+                    <RotateCcw v-if="isFetchingModels" class="w-3.5 h-3.5 animate-spin" />
+                    <RotateCcw v-else class="w-3.5 h-3.5" />
+                    Fetch
+                  </button>
+                </div>
+                <div v-if="openModelPickers['refine'] && availableModels.length"
+                  class="absolute top-full left-0 right-14 z-20 mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl overflow-y-auto max-h-52">
+                  <button v-for="m in availableModels" :key="'re-'+m"
+                    @click="settings.refineModel = m; openModelPickers['refine'] = false"
+                    class="w-full text-left px-4 py-2.5 text-sm hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-colors border-b border-slate-100 dark:border-slate-700 last:border-0"
+                    :class="m === settings.refineModel ? 'text-indigo-600 font-bold' : 'text-slate-700 dark:text-slate-300'">
+                    {{ m }}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div class="space-y-1.5">
+              <label class="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center justify-between">
+                System Prompt Instructions <span class="text-indigo-500 normal-case font-bold text-[10px]">Editor</span>
+              </label>
+              <textarea v-model="settings.refineSystemPrompt"
+                class="w-full min-h-[400px] bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl p-4 text-slate-900 dark:text-white font-medium text-sm leading-relaxed focus:ring-2 focus:ring-indigo-400/40 focus:border-indigo-400 outline-none transition-all resize-y custom-scrollbar"
+                placeholder="กำหนดบทบาทและกฎเกณฑ์ให้ AI ในการขัดเกลาคำถาม..."></textarea>
             </div>
           </div>
 
-          <div class="space-y-2">
-            <label class="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center justify-between">
-              System Prompt Instructions
-              <span class="text-indigo-500">Editor</span>
-            </label>
-            <textarea 
-              v-model="settings.refineSystemPrompt"
-              class="w-full min-h-[600px] bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 text-slate-900 dark:text-white font-medium text-sm leading-relaxed focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all resize-none custom-scrollbar shadow-sm"
-              placeholder="กำหนดบทบาทและกฎเกณฑ์ให้ AI ในการขัดเกลาคำถาม..."
-            ></textarea>
-          </div>
-        </div>
-      </section>
-
-      <!-- Generate Engine Settings -->
-      <section class="bg-white dark:bg-slate-900 rounded-[2rem] border border-slate-200 dark:border-slate-800 overflow-hidden shadow-sm flex flex-col">
-        <div class="p-6 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 flex items-center justify-between">
-          <div class="flex items-center gap-4">
-            <div class="w-10 h-10 rounded-xl bg-blue-500/10 flex items-center justify-center">
-              <Terminal class="w-5 h-5 text-blue-500" />
-            </div>
-            <div>
-              <h3 class="font-bold text-slate-900 dark:text-white">SQL Generation</h3>
-              <p class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold tracking-widest">ระบบสร้างคำสั่ง SQL</p>
-            </div>
-          </div>
-          <div class="flex items-center gap-2">
-            <button 
-              @click="syncPicklists"
-              :disabled="syncingPicklists"
-              class="p-2 rounded-lg hover:bg-white dark:hover:bg-slate-800 text-slate-400 hover:text-blue-600 transition-all flex items-center gap-2"
-              title="ดึงข้อมูล Picklist จาก Vtiger"
-            >
-              <RotateCcw v-if="syncingPicklists" class="w-4 h-4 animate-spin" />
-              <Database v-else class="w-4 h-4" />
-              <span class="text-[10px] font-bold uppercase tracking-widest hidden md:inline">Sync DB</span>
-            </button>
-            <button 
-              @click="restoreGenerateDefaults"
-              class="p-2 rounded-lg hover:bg-white dark:hover:bg-slate-800 text-slate-400 hover:text-blue-600 transition-all"
-              title="คืนค่าเริ่มต้น"
-            >
-              <RotateCcw class="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-        
-        <div class="p-8 space-y-6 flex-1">
-          <div class="space-y-2">
-            <label class="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
-              AI Model Selection
-            </label>
-            <input 
-              type="text"
-              v-model="settings.generateModel"
-              class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-3 text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all font-medium"
-              placeholder="เช่น gemini-2.5-pro"
-            />
-            <div class="flex flex-wrap gap-2 mt-2 items-center">
-              <span class="text-[10px] text-slate-500 font-bold uppercase tracking-wider">ตัวเลือก:</span>
-              <button
-                v-if="!openModelPickers['generate']"
-                @click="toggleModelPicker('generate')"
-                :disabled="isFetchingModels"
-                class="px-3 py-1 bg-blue-50 hover:bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 text-[10px] rounded-md transition-colors font-bold flex items-center gap-1 border border-blue-200 dark:border-blue-800/50"
-              >
-                <RotateCcw v-if="isFetchingModels" class="w-3 h-3 animate-spin" />
-                <Database v-else class="w-3 h-3" />
-                ดึงรายชื่อโมเดลล่าสุด
+          <!-- ── Tab: Data Analysis ── -->
+          <div v-show="activeTab === 'analyze'" class="space-y-6">
+            <div class="flex items-center justify-between">
+              <div>
+                <h3 class="font-bold text-slate-900 dark:text-white">Data Analysis</h3>
+                <p class="text-xs text-slate-500 mt-0.5">ระบบสรุปและวิเคราะห์ข้อมูล</p>
+              </div>
+              <button @click="restoreAnalyzeDefaults" class="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-violet-600 transition-all" title="คืนค่าเริ่มต้น">
+                <RotateCcw class="w-4 h-4" />
               </button>
-              <template v-else>
-                <button
-                  v-for="model in availableModels"
-                  :key="model"
-                  @click="settings.generateModel = model"
-                  class="px-2 py-1 bg-slate-100 hover:bg-blue-100 dark:bg-slate-800 dark:hover:bg-blue-900/50 text-slate-600 dark:text-slate-300 text-[10px] rounded-md transition-colors font-medium border border-slate-200 dark:border-slate-700"
-                >
-                  {{ model }}
-                </button>
-                <button
-                  @click="openModelPickers['generate'] = false"
-                  class="px-2 py-1 bg-slate-100 hover:bg-rose-100 dark:bg-slate-800 dark:hover:bg-rose-900/30 text-slate-400 hover:text-rose-500 text-[10px] rounded-md transition-colors font-bold flex items-center gap-1 border border-slate-200 dark:border-slate-700"
-                  title="ซ่อนรายชื่อโมเดล"
-                >
-                  <EyeOff class="w-3 h-3" />
-                  ซ่อน
-                </button>
-              </template>
+            </div>
+
+            <div class="space-y-1.5">
+              <label class="text-[10px] font-black text-slate-400 uppercase tracking-widest">AI Model</label>
+              <div class="relative">
+                <div class="flex gap-2">
+                  <input :value="settings.analyzeModel" readonly @click="toggleModelPicker('analyze')"
+                    class="flex-1 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-900 dark:text-white cursor-pointer focus:outline-none focus:ring-2 focus:ring-violet-400/40 font-medium" />
+                  <button @click="toggleModelPicker('analyze')" :disabled="isFetchingModels"
+                    class="px-4 py-2.5 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-bold text-slate-600 dark:text-slate-300 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 flex items-center gap-1.5 transition-all">
+                    <RotateCcw v-if="isFetchingModels" class="w-3.5 h-3.5 animate-spin" />
+                    <RotateCcw v-else class="w-3.5 h-3.5" />
+                    Fetch
+                  </button>
+                </div>
+                <div v-if="openModelPickers['analyze'] && availableModels.length"
+                  class="absolute top-full left-0 right-14 z-20 mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl overflow-y-auto max-h-52">
+                  <button v-for="m in availableModels" :key="'an-'+m"
+                    @click="settings.analyzeModel = m; openModelPickers['analyze'] = false"
+                    class="w-full text-left px-4 py-2.5 text-sm hover:bg-violet-50 dark:hover:bg-violet-900/20 transition-colors border-b border-slate-100 dark:border-slate-700 last:border-0"
+                    :class="m === settings.analyzeModel ? 'text-violet-600 font-bold' : 'text-slate-700 dark:text-slate-300'">
+                    {{ m }}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div class="space-y-1.5">
+              <label class="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center justify-between">
+                Analysis Guidelines <span class="text-violet-500 normal-case font-bold text-[10px]">System Instruction</span>
+              </label>
+              <textarea v-model="settings.analyzeSystemInstruction"
+                class="w-full min-h-[400px] bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl p-4 text-slate-900 dark:text-white font-medium text-sm leading-relaxed focus:ring-2 focus:ring-violet-400/40 focus:border-violet-400 outline-none transition-all resize-y custom-scrollbar"
+                placeholder="กำหนดบทบาทให้ AI สำหรับการวิเคราะห์และสรุปผล..."></textarea>
             </div>
           </div>
 
-          <div class="space-y-2">
-            <label class="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center justify-between">
-              Vtiger Schema & Rules
-              <span class="text-blue-500">Database Context</span>
-            </label>
-            <textarea 
-              v-model="settings.generateSystemInstruction"
-              class="w-full min-h-[600px] bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 text-slate-900 dark:text-white font-medium text-xs leading-relaxed focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all resize-none custom-scrollbar shadow-sm"
-              placeholder="ใส่ข้อมูล Schema และเงื่อนไขการสร้าง SQL..."
-            ></textarea>
-          </div>
-          
-          <div class="pt-6 border-t border-slate-100 dark:border-slate-800 space-y-2">
-            <label class="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
-              Optimize SQL Model <span class="text-rose-500">*สำหรับผู้บริหารและ DBA*</span>
-            </label>
-            <p class="text-[10px] text-slate-500 mb-2">โมเดลที่ใช้สำหรับปุ่ม Optimize SQL ในหน้าหลัก (แนะนำให้ใช้โมเดลรุ่น Pro เพื่อประสิทธิภาพสูงสุด)</p>
-            <input 
-              type="text"
-              v-model="settings.optimizeModel"
-              class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-3 text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all font-medium"
-              placeholder="เช่น gemini-3.1-pro"
-            />
-            <div class="flex flex-wrap gap-2 mt-2 items-center">
-              <span class="text-[10px] text-slate-500 font-bold uppercase tracking-wider">ตัวเลือก:</span>
-              <button
-                v-if="!openModelPickers['optimize']"
-                @click="toggleModelPicker('optimize')"
-                :disabled="isFetchingModels"
-                class="px-3 py-1 bg-blue-50 hover:bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 text-[10px] rounded-md transition-colors font-bold flex items-center gap-1 border border-blue-200 dark:border-blue-800/50"
-              >
-                <RotateCcw v-if="isFetchingModels" class="w-3 h-3 animate-spin" />
-                <Database v-else class="w-3 h-3" />
-                ดึงรายชื่อโมเดลล่าสุด
+          <!-- ── Tab: Data Chatbot ── -->
+          <div v-show="activeTab === 'chat'" class="space-y-6">
+            <div class="flex items-center justify-between">
+              <div>
+                <h3 class="font-bold text-slate-900 dark:text-white">Data Chatbot</h3>
+                <p class="text-xs text-slate-500 mt-0.5">ระบบแชตกับข้อมูล</p>
+              </div>
+              <button @click="restoreChatDefaults" class="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-teal-600 transition-all" title="คืนค่าเริ่มต้น">
+                <RotateCcw class="w-4 h-4" />
               </button>
-              <template v-else>
-                <button
-                  v-for="model in availableModels"
-                  :key="'opt-'+model"
-                  @click="settings.optimizeModel = model"
-                  class="px-2 py-1 bg-slate-100 hover:bg-blue-100 dark:bg-slate-800 dark:hover:bg-blue-900/50 text-slate-600 dark:text-slate-300 text-[10px] rounded-md transition-colors font-medium border border-slate-200 dark:border-slate-700"
-                >
-                  {{ model }}
-                </button>
-                <button
-                  @click="openModelPickers['optimize'] = false"
-                  class="px-2 py-1 bg-slate-100 hover:bg-rose-100 dark:bg-slate-800 dark:hover:bg-rose-900/30 text-slate-400 hover:text-rose-500 text-[10px] rounded-md transition-colors font-bold flex items-center gap-1 border border-slate-200 dark:border-slate-700"
-                  title="ซ่อนรายชื่อโมเดล"
-                >
-                  <EyeOff class="w-3 h-3" />
-                  ซ่อน
-                </button>
-              </template>
             </div>
-          </div>
-        </div>
-      </section>
 
-      <!-- Analyze Engine Settings -->
-      <section class="bg-white dark:bg-slate-900 rounded-[2rem] border border-slate-200 dark:border-slate-800 overflow-hidden shadow-sm flex flex-col">
-        <div class="p-6 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 flex items-center justify-between">
-          <div class="flex items-center gap-4">
-            <div class="w-10 h-10 rounded-xl bg-violet-500/10 flex items-center justify-center">
-              <BarChart3 class="w-5 h-5 text-violet-500" />
+            <div class="space-y-1.5">
+              <label class="text-[10px] font-black text-slate-400 uppercase tracking-widest">AI Model</label>
+              <div class="relative">
+                <div class="flex gap-2">
+                  <input :value="settings.chatModel" readonly @click="toggleModelPicker('chat')"
+                    class="flex-1 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-900 dark:text-white cursor-pointer focus:outline-none focus:ring-2 focus:ring-teal-400/40 font-medium" />
+                  <button @click="toggleModelPicker('chat')" :disabled="isFetchingModels"
+                    class="px-4 py-2.5 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-bold text-slate-600 dark:text-slate-300 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 flex items-center gap-1.5 transition-all">
+                    <RotateCcw v-if="isFetchingModels" class="w-3.5 h-3.5 animate-spin" />
+                    <RotateCcw v-else class="w-3.5 h-3.5" />
+                    Fetch
+                  </button>
+                </div>
+                <div v-if="openModelPickers['chat'] && availableModels.length"
+                  class="absolute top-full left-0 right-14 z-20 mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl overflow-y-auto max-h-52">
+                  <button v-for="m in availableModels" :key="'ch-'+m"
+                    @click="settings.chatModel = m; openModelPickers['chat'] = false"
+                    class="w-full text-left px-4 py-2.5 text-sm hover:bg-teal-50 dark:hover:bg-teal-900/20 transition-colors border-b border-slate-100 dark:border-slate-700 last:border-0"
+                    :class="m === settings.chatModel ? 'text-teal-600 font-bold' : 'text-slate-700 dark:text-slate-300'">
+                    {{ m }}
+                  </button>
+                </div>
+              </div>
             </div>
-            <div>
-              <h3 class="font-bold text-slate-900 dark:text-white">Data Analysis</h3>
-              <p class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold tracking-widest">ระบบสรุปและวิเคราะห์ข้อมูล</p>
-            </div>
-          </div>
-          <button 
-            @click="restoreAnalyzeDefaults"
-            class="p-2 rounded-lg hover:bg-white dark:hover:bg-slate-800 text-slate-400 hover:text-violet-600 transition-all"
-            title="คืนค่าเริ่มต้น"
-          >
-            <RotateCcw class="w-4 h-4" />
-          </button>
-        </div>
-        
-        <div class="p-8 space-y-6 flex-1">
-          <div class="space-y-2">
-            <label class="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
-              AI Model Selection
-            </label>
-            <input 
-              type="text"
-              v-model="settings.analyzeModel"
-              class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-3 text-slate-900 dark:text-white focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 outline-none transition-all font-medium"
-              placeholder="เช่น gemini-2.0-flash"
-            />
-            <div class="flex flex-wrap gap-2 mt-2 items-center">
-              <span class="text-[10px] text-slate-500 font-bold uppercase tracking-wider">ตัวเลือก:</span>
-              <button
-                v-if="!openModelPickers['analyze']"
-                @click="toggleModelPicker('analyze')"
-                :disabled="isFetchingModels"
-                class="px-3 py-1 bg-violet-50 hover:bg-violet-100 dark:bg-violet-900/30 text-violet-600 dark:text-violet-400 text-[10px] rounded-md transition-colors font-bold flex items-center gap-1 border border-violet-200 dark:border-violet-800/50"
-              >
-                <RotateCcw v-if="isFetchingModels" class="w-3 h-3 animate-spin" />
-                <Database v-else class="w-3 h-3" />
-                ดึงรายชื่อโมเดลล่าสุด
-              </button>
-              <template v-else>
-                <button
-                  v-for="model in availableModels"
-                  :key="model"
-                  @click="settings.analyzeModel = model"
-                  class="px-2 py-1 bg-slate-100 hover:bg-violet-100 dark:bg-slate-800 dark:hover:bg-violet-900/50 text-slate-600 dark:text-slate-300 text-[10px] rounded-md transition-colors font-medium border border-slate-200 dark:border-slate-700"
-                >
-                  {{ model }}
-                </button>
-                <button
-                  @click="openModelPickers['analyze'] = false"
-                  class="px-2 py-1 bg-slate-100 hover:bg-rose-100 dark:bg-slate-800 dark:hover:bg-rose-900/30 text-slate-400 hover:text-rose-500 text-[10px] rounded-md transition-colors font-bold flex items-center gap-1 border border-slate-200 dark:border-slate-700"
-                  title="ซ่อนรายชื่อโมเดล"
-                >
-                  <EyeOff class="w-3 h-3" />
-                  ซ่อน
-                </button>
-              </template>
+
+            <div class="space-y-1.5">
+              <label class="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center justify-between">
+                Chatbot Personality <span class="text-teal-500 normal-case font-bold text-[10px]">System Instruction</span>
+              </label>
+              <textarea v-model="settings.chatSystemInstruction"
+                class="w-full min-h-[400px] bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl p-4 text-slate-900 dark:text-white font-medium text-sm leading-relaxed focus:ring-2 focus:ring-teal-400/40 focus:border-teal-400 outline-none transition-all resize-y custom-scrollbar"
+                placeholder="กำหนดบทบาทให้ AI สำหรับการแชตตอบคำถาม..."></textarea>
             </div>
           </div>
 
-          <div class="space-y-2">
-            <label class="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center justify-between">
-              Analysis Guidelines
-              <span class="text-violet-500">System Instruction</span>
-            </label>
-            <textarea 
-              v-model="settings.analyzeSystemInstruction"
-              class="w-full min-h-[300px] bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 text-slate-900 dark:text-white font-medium text-sm leading-relaxed focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 outline-none transition-all resize-none custom-scrollbar shadow-sm"
-              placeholder="กำหนดบทบาทให้ AI สำหรับการวิเคราะห์และสรุปผล..."
-            ></textarea>
-          </div>
         </div>
-      </section>
-
-      <!-- Chat Engine Settings -->
-      <section class="bg-white dark:bg-slate-900 rounded-[2rem] border border-slate-200 dark:border-slate-800 overflow-hidden shadow-sm flex flex-col">
-        <div class="p-6 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 flex items-center justify-between">
-          <div class="flex items-center gap-4">
-            <div class="w-10 h-10 rounded-xl bg-teal-500/10 flex items-center justify-center">
-              <Bot class="w-5 h-5 text-teal-500" />
-            </div>
-            <div>
-              <h3 class="font-bold text-slate-900 dark:text-white">Data Chatbot</h3>
-              <p class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold tracking-widest">ระบบแชตกับข้อมูล</p>
-            </div>
-          </div>
-          <button 
-            @click="restoreChatDefaults"
-            class="p-2 rounded-lg hover:bg-white dark:hover:bg-slate-800 text-slate-400 hover:text-teal-600 transition-all"
-            title="คืนค่าเริ่มต้น"
-          >
-            <RotateCcw class="w-4 h-4" />
-          </button>
-        </div>
-        
-        <div class="p-8 space-y-6 flex-1">
-          <div class="space-y-2">
-            <label class="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
-              AI Model Selection
-            </label>
-            <input 
-              type="text"
-              v-model="settings.chatModel"
-              class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-3 text-slate-900 dark:text-white focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 outline-none transition-all font-medium"
-              placeholder="เช่น gemini-2.0-flash"
-            />
-            <div class="flex flex-wrap gap-2 mt-2 items-center">
-              <span class="text-[10px] text-slate-500 font-bold uppercase tracking-wider">ตัวเลือก:</span>
-              <button
-                v-if="!openModelPickers['chat']"
-                @click="toggleModelPicker('chat')"
-                :disabled="isFetchingModels"
-                class="px-3 py-1 bg-teal-50 hover:bg-teal-100 dark:bg-teal-900/30 text-teal-600 dark:text-teal-400 text-[10px] rounded-md transition-colors font-bold flex items-center gap-1 border border-teal-200 dark:border-teal-800/50"
-              >
-                <RotateCcw v-if="isFetchingModels" class="w-3 h-3 animate-spin" />
-                <Database v-else class="w-3 h-3" />
-                ดึงรายชื่อโมเดลล่าสุด
-              </button>
-              <template v-else>
-                <button
-                  v-for="model in availableModels"
-                  :key="model"
-                  @click="settings.chatModel = model"
-                  class="px-2 py-1 bg-slate-100 hover:bg-teal-100 dark:bg-slate-800 dark:hover:bg-teal-900/50 text-slate-600 dark:text-slate-300 text-[10px] rounded-md transition-colors font-medium border border-slate-200 dark:border-slate-700"
-                >
-                  {{ model }}
-                </button>
-                <button
-                  @click="openModelPickers['chat'] = false"
-                  class="px-2 py-1 bg-slate-100 hover:bg-rose-100 dark:bg-slate-800 dark:hover:bg-rose-900/30 text-slate-400 hover:text-rose-500 text-[10px] rounded-md transition-colors font-bold flex items-center gap-1 border border-slate-200 dark:border-slate-700"
-                  title="ซ่อนรายชื่อโมเดล"
-                >
-                  <EyeOff class="w-3 h-3" />
-                  ซ่อน
-                </button>
-              </template>
-            </div>
-          </div>
-
-          <div class="space-y-2">
-            <label class="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center justify-between">
-              Chatbot Personality
-              <span class="text-teal-500">System Instruction</span>
-            </label>
-            <textarea 
-              v-model="settings.chatSystemInstruction"
-              class="w-full min-h-[300px] bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 text-slate-900 dark:text-white font-medium text-sm leading-relaxed focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 outline-none transition-all resize-none custom-scrollbar shadow-sm"
-              placeholder="กำหนดบทบาทให้ AI สำหรับการแชตตอบคำถาม..."
-            ></textarea>
-          </div>
-        </div>
-      </section>
+      </div>
 
       <!-- Other Settings -->
-      <section class="bg-white dark:bg-slate-900 rounded-[2rem] border border-slate-200 dark:border-slate-800 overflow-hidden shadow-sm flex flex-col xl:col-span-2">
+      <section class="bg-white dark:bg-slate-900 rounded-[2rem] border border-slate-200 dark:border-slate-800 overflow-hidden shadow-sm flex flex-col">
         <div class="p-6 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 flex items-center justify-between">
           <div class="flex items-center gap-4">
             <div class="w-10 h-10 rounded-xl bg-slate-500/10 flex items-center justify-center">

@@ -7,9 +7,9 @@ export default defineEventHandler(async (event) => {
   const body = await readBody(event);
 
   const {
-    refineModel, 
-    refineSystemPrompt, 
-    generateModel, 
+    refineModel,
+    refineSystemPrompt,
+    generateModel,
     generateSystemInstruction,
     analyzeModel,
     analyzeSystemInstruction,
@@ -18,7 +18,10 @@ export default defineEventHandler(async (event) => {
     optimizeModel,
     maxResultsLimit,
     useHybridSchema,
-    isDebugMode
+    isDebugMode,
+    customHints,
+    agenticModel,
+    generateMode
   } = body;
 
   try {
@@ -40,7 +43,10 @@ export default defineEventHandler(async (event) => {
           optimizeModel,
           maxResultsLimit,
           useHybridSchema,
-          isDebugMode
+          isDebugMode,
+          customHints: customHints ?? null,
+          agenticModel: agenticModel ?? 'gemini-2.5-flash',
+          generateMode: generateMode ?? 'agentic'
         })
         .where(eq(aiSettings.id, 'global'));
     } else {
@@ -58,7 +64,10 @@ export default defineEventHandler(async (event) => {
         optimizeModel,
         maxResultsLimit,
         useHybridSchema,
-        isDebugMode
+        isDebugMode,
+        customHints: customHints ?? null,
+        agenticModel: agenticModel ?? 'gemini-2.5-flash',
+        generateMode: generateMode ?? 'agentic'
       });
     }
 
