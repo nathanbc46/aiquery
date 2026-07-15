@@ -47,7 +47,8 @@ import {
   PanelLeftOpen,
   Zap,
   FileText,
-  Table2
+  Table2,
+  Layers
 } from 'lucide-vue-next'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
@@ -698,6 +699,30 @@ const sendChatMessage = async () => {
   }
 }
 
+const fetchAllRows = async () => {
+  if (!generatedResult.value?.sql || isFetchingAllRows.value) return
+  // ถ้ามี cache อยู่แล้ว แค่ toggle แสดง ไม่ต้อง fetch ใหม่
+  if (allRowsData.value.length > 0) {
+    showAllRows.value = true
+    showPreview.value = true
+    return
+  }
+  isFetchingAllRows.value = true
+  try {
+    const res: any = await $fetch('/api/ai-query/preview', {
+      method: 'POST',
+      body: { query: generatedResult.value.sql, fetchAll: true }
+    })
+    if (res.success) {
+      allRowsData.value = res.data
+      showAllRows.value = true
+      showPreview.value = true
+    }
+  } finally {
+    isFetchingAllRows.value = false
+  }
+}
+
 const openCsvModal = () => {
   const today = new Date().toISOString().slice(0, 10).replace(/-/g, '')
   csvFilename.value = `AI_Export_${today}`
@@ -1235,10 +1260,12 @@ const error = ref<string | null>(null)
 const showPreview = ref(false)
 const previewSearch = ref('')
 const showAllRows = ref(false)
+const isFetchingAllRows = ref(false)
+const allRowsData = ref<any[]>([])
 const resultSection = ref<HTMLElement | null>(null)
 
 const filteredPreviewData = computed(() => {
-  const data = generatedResult.value?.previewData ?? []
+  const data = showAllRows.value ? allRowsData.value : (generatedResult.value?.previewData ?? [])
   if (!previewSearch.value.trim()) return data
   const q = previewSearch.value.toLowerCase()
   return data.filter((row: any) =>
@@ -1498,6 +1525,7 @@ const fetchData = async () => {
       showPreview.value = true
       previewSearch.value = ''
       showAllRows.value = false
+      allRowsData.value = []
       activeTab.value = 3
       toast.success('ดึงข้อมูลสำเร็จ', `พบข้อมูล ${(response.totalCount ?? 0).toLocaleString()} รายการ`)
       // ถ้า explanation เดิมเป็น error ให้ดึง explanation ใหม่จาก AI
@@ -1819,6 +1847,7 @@ const submitDirectSql = async () => {
       showPreview.value = true
       previewSearch.value = ''
       showAllRows.value = false
+      allRowsData.value = []
 
       if (explainRes.success) {
         generatedResult.value.explanation = explainRes.explanation
@@ -1900,6 +1929,7 @@ const updateSql = async () => {
       showPreview.value = true
       previewSearch.value = ''
       showAllRows.value = false
+      allRowsData.value = []
       activeTab.value = 3
 
       toast.success('อัปเดตสำเร็จ', 'ระบบอัปเดตข้อมูลตามคำสั่ง SQL ใหม่ของคุณเรียบร้อยแล้ว')
@@ -1944,6 +1974,7 @@ const runDraftQuery = async () => {
       showPreview.value = true
       previewSearch.value = ''
       showAllRows.value = false
+      allRowsData.value = []
       activeTab.value = 3
 
       toast.success('ดึงข้อมูลสำเร็จ', 'ระบบประมวลผลข้อมูลตามคำสั่ง SQL เรียบร้อยแล้ว')
@@ -2207,7 +2238,7 @@ const highlightSql = (sqlStr: string) => {
                   :readonly="isUpdatingSql"
                   @scroll="syncDirectSqlHighlightScroll"
                   @keydown.ctrl.enter.prevent="submitDirectSql()"
-                  @paste.prevent="(e) => { const text = e.clipboardData?.getData('text') || ''; directSql = formatSql(text) || text }"
+                  @paste.prevent="(e) => { const text = e.clipboardData?.getData('text') || ''; const el = e.target as HTMLTextAreaElement; const start = el.selectionStart ?? directSql.length; const end = el.selectionEnd ?? directSql.length; if (!directSql.trim()) { directSql = formatSql(text) || text } else { directSql = directSql.substring(0, start) + text + directSql.substring(end) } }"
                   placeholder="วางคำสั่ง SQL ที่นี่... (Ctrl+Enter เพื่อรัน)"
                   spellcheck="false" autocomplete="off"
                   class="sql-editor-textarea focus:outline-none disabled:opacity-50"
@@ -3029,14 +3060,33 @@ const highlightSql = (sqlStr: string) => {
       </div>
 
       <!-- ── Tab 3: Data Preview + Actions ── -->
-      <div v-show="activeTab === 3" v-if="generatedResult">
+      <div v-show="activeTab === 3" v-if="generatedResult"
+           :class="isResultFullscreen ? 'flex-1 flex flex-col overflow-hidden min-h-0' : ''">
         <!-- Total Records row (compact) -->
-        <div v-if="generatedResult.previewData !== null" class="flex items-center gap-4 px-4 py-2.5 border-b border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/50">
+        <div v-if="generatedResult.previewData !== null" class="flex items-center gap-4 px-4 py-2.5 border-b border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/50 shrink-0">
           <span class="font-bold text-[10px] uppercase tracking-[0.3em] text-slate-400">Total Records</span>
           <div class="text-3xl font-black tracking-tighter" :class="generatedResult.previewCount > 0 ? 'text-slate-900 dark:text-white' : 'text-rose-500'">
             {{ (generatedResult.previewCount ?? 0).toLocaleString() }}
           </div>
           <span class="text-[10px] font-black text-blue-600 dark:text-blue-400 uppercase tracking-[0.2em]">รายการที่พบ</span>
+          <!-- ปุ่มแสดงทุกเรคคอร์ด -->
+          <button
+            v-if="!showAllRows && generatedResult.previewCount > (generatedResult.previewData?.length ?? 0)"
+            @click="fetchAllRows"
+            :disabled="isFetchingAllRows"
+            class="ml-2 px-3 py-1 text-[10px] font-black uppercase tracking-widest rounded-lg bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-800/50 transition-all flex items-center gap-1.5 disabled:opacity-60">
+            <Loader2 v-if="isFetchingAllRows" class="w-3 h-3 animate-spin" />
+            <Layers v-else class="w-3 h-3" />
+            {{ isFetchingAllRows ? 'กำลังโหลด...' : 'แสดงทุกเรคคอร์ด' }}
+          </button>
+          <!-- ปุ่มกลับไปตัวอย่าง -->
+          <button
+            v-if="showAllRows"
+            @click="showAllRows = false"
+            class="ml-2 px-3 py-1 text-[10px] font-black uppercase tracking-widest rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all flex items-center gap-1.5">
+            <X class="w-3 h-3" />
+            ตัวอย่าง
+          </button>
         </div>
 
         <!-- Zero Records Warning -->
@@ -3049,15 +3099,19 @@ const highlightSql = (sqlStr: string) => {
         </div>
 
         <!-- Data Preview Table -->
-        <div v-if="generatedResult.previewData" class="p-4 border-b border-slate-200 dark:border-slate-800">
-          <div class="flex items-center gap-3 mb-3">
+        <div v-if="generatedResult.previewData"
+             class="border-b border-slate-200 dark:border-slate-800"
+             :class="isResultFullscreen ? 'flex-1 flex flex-col overflow-hidden min-h-0 p-4' : 'p-4'">
+          <div class="flex items-center gap-3 mb-3 shrink-0">
             <div class="w-8 h-8 rounded-xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-500 border border-slate-200 dark:border-slate-700 shrink-0">
               <Database class="w-4 h-4" />
             </div>
             <div class="shrink-0">
               <div class="text-[9px] font-black uppercase tracking-[0.3em] text-slate-400 mb-0.5">Data Insights</div>
               <h4 class="text-sm font-bold text-slate-900 dark:text-white">
-                ตัวอย่างข้อมูล {{ generatedResult.previewData.length }} รายการแรก
+                {{ showAllRows
+                  ? `ข้อมูลทั้งหมด ${allRowsData.length.toLocaleString()} รายการ`
+                  : `ตัวอย่างข้อมูล ${generatedResult.previewData.length} รายการแรก` }}
                 <span v-if="previewSearch.trim()" class="text-blue-500 dark:text-blue-400 font-normal ml-1">(พบ {{ filteredPreviewData.length }} รายการ)</span>
               </h4>
             </div>
@@ -3078,36 +3132,39 @@ const highlightSql = (sqlStr: string) => {
               {{ showPreview ? 'ซ่อนตัวอย่าง' : 'แสดงตัวอย่างข้อมูล' }}
             </button>
           </div>
-          <transition name="fade">
-            <div v-if="showPreview">
-              <!-- ตาราง -->
-              <div class="overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-800 bg-white/50 dark:bg-slate-950/50 backdrop-blur-sm custom-scrollbar max-h-[400px] overflow-y-auto">
-                <table class="w-full text-left border-collapse">
-                  <thead>
-                    <tr class="bg-slate-50/50 dark:bg-slate-900/50 sticky top-0 z-10 backdrop-blur-md">
-                      <th v-for="(val, key) in (generatedResult.previewData?.[0] ?? {})" :key="key" class="px-5 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest border-b border-slate-200 dark:border-slate-800">
-                        {{ key }}
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
-                    <tr v-for="(row, idx) in filteredPreviewData" :key="idx" class="hover:bg-blue-50/30 dark:hover:bg-blue-900/10 transition-colors">
-                      <td v-for="(val, key) in row" :key="key" class="px-5 py-2.5 text-xs font-medium text-slate-700 dark:text-slate-300 tabular-nums">
-                        {{ formatCellValue(val, key) }}
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-                <div v-if="filteredPreviewData.length === 0 && previewSearch.trim()" class="py-10 text-center text-sm text-slate-400">
-                  ไม่พบข้อมูลที่ตรงกับ "{{ previewSearch }}"
+          <div :class="isResultFullscreen && showPreview ? 'flex-1 flex flex-col overflow-hidden min-h-0' : ''">
+            <transition name="fade">
+              <div v-if="showPreview" :class="isResultFullscreen ? 'flex-1 flex flex-col overflow-hidden min-h-0' : ''">
+                <!-- ตาราง -->
+                <div class="overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-800 bg-white/50 dark:bg-slate-950/50 backdrop-blur-sm custom-scrollbar overflow-y-auto"
+                     :class="isResultFullscreen ? 'flex-1 min-h-0' : 'max-h-[400px]'">
+                  <table class="w-full text-left border-collapse">
+                    <thead>
+                      <tr class="bg-slate-50/50 dark:bg-slate-900/50 sticky top-0 z-10 backdrop-blur-md">
+                        <th v-for="(val, key) in (filteredPreviewData?.[0] ?? generatedResult.previewData?.[0] ?? {})" :key="key" class="px-5 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest border-b border-slate-200 dark:border-slate-800">
+                          {{ key }}
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
+                      <tr v-for="(row, idx) in filteredPreviewData" :key="idx" class="hover:bg-blue-50/30 dark:hover:bg-blue-900/10 transition-colors">
+                        <td v-for="(val, key) in row" :key="key" class="px-5 py-2.5 text-xs font-medium text-slate-700 dark:text-slate-300 tabular-nums">
+                          {{ formatCellValue(val, key) }}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                  <div v-if="filteredPreviewData.length === 0 && previewSearch.trim()" class="py-10 text-center text-sm text-slate-400">
+                    ไม่พบข้อมูลที่ตรงกับ "{{ previewSearch }}"
+                  </div>
                 </div>
               </div>
-            </div>
-          </transition>
+            </transition>
+          </div>
         </div>
 
         <!-- Action Footer -->
-        <div v-if="generatedResult.previewData" class="p-4 bg-slate-50/50 dark:bg-slate-900/50 border-t border-slate-200 dark:border-slate-800 flex flex-col lg:flex-row justify-between items-center gap-4">
+        <div v-if="generatedResult.previewData" class="p-4 bg-slate-50/50 dark:bg-slate-900/50 border-t border-slate-200 dark:border-slate-800 flex flex-col lg:flex-row justify-between items-center gap-4 shrink-0">
           <div class="flex items-center gap-4 w-full lg:w-auto">
             <div class="w-11 h-11 rounded-xl bg-white dark:bg-slate-800 flex items-center justify-center border border-slate-200 dark:border-slate-700 shadow-sm shrink-0">
               <ShieldCheck class="w-5 h-5 text-emerald-500" />
@@ -4492,7 +4549,7 @@ const highlightSql = (sqlStr: string) => {
                 @scroll="syncDirectSqlFsScroll"
                 @keydown.ctrl.enter.prevent="isDirectSqlFullscreen = false; $nextTick(() => submitDirectSql())"
                 @keydown.escape.prevent="isDirectSqlFullscreen = false"
-                @paste.prevent="(e) => { const text = e.clipboardData?.getData('text') || ''; directSql = formatSql(text) || text }"
+                @paste.prevent="(e) => { const text = e.clipboardData?.getData('text') || ''; const el = e.target as HTMLTextAreaElement; const start = el.selectionStart ?? directSql.length; const end = el.selectionEnd ?? directSql.length; if (!directSql.trim()) { directSql = formatSql(text) || text } else { directSql = directSql.substring(0, start) + text + directSql.substring(end) } }"
                 placeholder="วางหรือพิมพ์คำสั่ง SQL ที่นี่..."
                 spellcheck="false" autocomplete="off"
                 class="sql-editor-textarea focus:outline-none"

@@ -12,7 +12,7 @@ export default defineEventHandler(async (event) => {
   }
 
   const body = await readBody(event)
-  const { query } = body
+  const { query, fetchAll } = body
 
   if (!query) {
     throw createError({
@@ -33,26 +33,25 @@ export default defineEventHandler(async (event) => {
   // Remove trailing semicolon if any (prevent syntax error when appending LIMIT)
   let cleanSql = query.trim().replace(/;$/, '')
 
-  // Force limit for preview based on role
   const isAdminOrManager = session.role === 'admin' || session.role === 'manager';
-  const previewLimit = isAdminOrManager ? 50 : 10;
-  
-  let previewSql = cleanSql
-  const limitRegex = /LIMIT\s+\d+$/i
-  
-  if (limitRegex.test(previewSql)) {
-    // If LIMIT exists at the end, replace it with appropriate limit
-    previewSql = previewSql.replace(limitRegex, `LIMIT ${previewLimit}`)
-  } else {
-    // If no LIMIT at the end, append it
-    previewSql = `${previewSql} LIMIT ${previewLimit}`
-  }
 
   try {
     const db = await useDb()
     // 1. ดึงขีดจำกัดสูงสุดจาก Settings
     const settingsList = await db.select().from(aiSettings).where(eq(aiSettings.id, 'global')).limit(1);
     const maxResultsLimit = settingsList[0]?.maxResultsLimit || DEFAULT_MAX_RESULTS_LIMIT;
+
+    // เลือก limit ตาม mode: fetchAll ใช้ maxResultsLimit, ปกติใช้ preview sample
+    const previewLimit = fetchAll ? maxResultsLimit : (isAdminOrManager ? 50 : 10);
+
+    let previewSql = cleanSql
+    const limitRegex = /LIMIT\s+\d+$/i
+
+    if (limitRegex.test(previewSql)) {
+      previewSql = previewSql.replace(limitRegex, `LIMIT ${previewLimit}`)
+    } else {
+      previewSql = `${previewSql} LIMIT ${previewLimit}`
+    }
 
     // ตั้งเวลา Timeout สำหรับ SQL นี้ (ป้องกันค้าง) - 60 วินาที
     await db.execute(sql.raw('SET SESSION MAX_EXECUTION_TIME = 60000'));
