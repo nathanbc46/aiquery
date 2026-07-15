@@ -160,9 +160,18 @@ const sqlFixInTabSuggestion = ref<{ cause: string; fix: string; fixedSql: string
 
 // SQL Chat ใน Tab 2
 const isSqlChatOpen = ref(false)
+const isSqlEditorExpanded = ref(false)
 const sqlChatMessages = ref<{ role: 'user' | 'model'; text: string; updatedSql?: string }[]>([])
 const sqlChatInput = ref('')
 const isSqlChatLoading = ref(false)
+const sqlChatInputRef = ref<HTMLTextAreaElement | null>(null)
+
+watch(isSqlChatOpen, async (val) => {
+  if (val) {
+    await nextTick()
+    sqlChatInputRef.value?.focus()
+  }
+})
 
 // Direct download (no history)
 const isDirectDownloading = ref(false)
@@ -194,10 +203,13 @@ const isCsvConfirmModalOpen = ref(false)
 const csvFilename = ref('')
 const csvExpiresAt = ref('')
 const csvSuccessDone = ref(false)
+const csvSkipEmail = ref(false)
 
 // Zoho success state
 const zohoSuccessDone = ref(false)
 const zohoExpiresAt = ref('')
+const zohoSkipEmail = ref(false)
+const zohoResultLink = ref('')
 
 // AI Chat (Admin) state
 const isChatModalOpen = ref(false)
@@ -613,6 +625,7 @@ const resetChat = () => {
   sqlChatMessages.value = []
   sqlChatInput.value = ''
   isSqlChatOpen.value = false
+  isSqlEditorExpanded.value = false
   isChatSelectMode.value = false
   selectedMsgIdxs.value = new Set()
   chatChartInstances.forEach(inst => { try { inst.destroy() } catch {} })
@@ -1118,6 +1131,7 @@ const handleZohoExport = async () => {
         requestReason: 'Export to Zoho WorkDrive',
         ownerVtigerId: zohoOwnerVtigerId.value || null,
         expiresAt: zohoResolvedExpiry,
+        skipEmail: zohoSkipEmail.value,
       }
     })
 
@@ -1131,17 +1145,15 @@ const handleZohoExport = async () => {
       method: 'POST',
       body: {
         sql: generatedResult.value.sql,
-        options: { ...zohoOptions.value, ownerVtigerId: zohoOwnerVtigerId.value, expiresAt: zohoResolvedExpiry },
+        options: { ...zohoOptions.value, ownerVtigerId: zohoOwnerVtigerId.value, expiresAt: zohoResolvedExpiry, skipEmail: zohoSkipEmail.value },
         requestId: requestResp.requestId
       }
     })
 
     if (response.success) {
       zohoSuccessDone.value = true
+      zohoResultLink.value = response.link || ''
       zohoOptions.value.linkName = ''
-      prompt.value = ''
-      requestReason.value = ''
-      generatedResult.value = null
     } else if (response.needsAuth) {
       window.location.href = response.authUrl
     } else {
@@ -1206,7 +1218,55 @@ const revertToOriginal = () => {
 
 const error = ref<string | null>(null)
 const showPreview = ref(false)
+const previewSearch = ref('')
+const showAllRows = ref(false)
 const resultSection = ref<HTMLElement | null>(null)
+
+const filteredPreviewData = computed(() => {
+  const data = generatedResult.value?.previewData ?? []
+  if (!previewSearch.value.trim()) return data
+  const q = previewSearch.value.toLowerCase()
+  return data.filter((row: any) =>
+    Object.values(row).some(v => String(v ?? '').toLowerCase().includes(q))
+  )
+})
+
+const formatCellValue = (val: any, key?: string | number): string => {
+  if (val === null || val === undefined) return '—'
+  const colName = String(key ?? '').toLowerCase()
+
+  // คอลัมน์ที่ไม่ควร format: ID, phone, mobile, tel
+  const isIdColumn = /\bid\b|_id$|^id_/.test(colName)
+  const isRawColumn = isIdColumn || /phone|mobile|\btel\b/i.test(colName)
+
+  if (typeof val === 'number') {
+    if (isRawColumn) return String(val)
+    // ตัวเลขที่ดูเหมือนปี (integer 1900-2200) ไม่ใส่ comma ไม่ว่า column จะชื่ออะไร
+    if (Number.isInteger(val) && val >= 1900 && val <= 2200) return String(val)
+    return Number.isInteger(val)
+      ? val.toLocaleString('th-TH')
+      : val.toLocaleString('th-TH', { maximumFractionDigits: 4 })
+  }
+
+  if (typeof val === 'string') {
+    const trimmed = val.trim()
+    // integer string (ไม่มีจุด)
+    if (/^\d+$/.test(trimmed) && trimmed.length > 3) {
+      if (isRawColumn) return val
+      const num = Number(trimmed)
+      if (num >= 1900 && num <= 2200) return val  // ปี
+      return num.toLocaleString('th-TH')
+    }
+    // decimal string เช่น "23567225.979"
+    if (/^\d+\.\d+$/.test(trimmed)) {
+      if (isRawColumn) return val
+      const num = Number(trimmed)
+      return num.toLocaleString('th-TH', { maximumFractionDigits: 4 })
+    }
+  }
+
+  return String(val)
+}
 
 const refineQuestion = () => {
   window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -1421,6 +1481,8 @@ const fetchData = async () => {
       generatedResult.value.status = 'success'
       generatedResult.value.dbError = null
       showPreview.value = true
+      previewSearch.value = ''
+      showAllRows.value = false
       activeTab.value = 3
       toast.success('ดึงข้อมูลสำเร็จ', `พบข้อมูล ${(response.totalCount ?? 0).toLocaleString()} รายการ`)
       // ถ้า explanation เดิมเป็น error ให้ดึง explanation ใหม่จาก AI
@@ -1590,6 +1652,7 @@ const requestApproval = async (skipDownload: boolean = false) => {
         requestReason: requestReason.value,
         ownerVtigerId: csvOwnerVtigerId.value || null,
         expiresAt: csvExpiresAt.value ? new Date(csvExpiresAt.value + 'T23:59:59').toISOString() : null,
+        skipEmail: csvSkipEmail.value,
       }
     })
     
@@ -1716,6 +1779,8 @@ const submitDirectSql = async () => {
       generatedResult.value.status = 'success'
       generatedResult.value.dbError = null
       showPreview.value = true
+      previewSearch.value = ''
+      showAllRows.value = false
 
       if (explainRes.success) {
         generatedResult.value.explanation = explainRes.explanation
@@ -1795,6 +1860,8 @@ const updateSql = async () => {
       generatedResult.value.status = 'success'
       generatedResult.value.dbError = null
       showPreview.value = true
+      previewSearch.value = ''
+      showAllRows.value = false
       activeTab.value = 3
 
       toast.success('อัปเดตสำเร็จ', 'ระบบอัปเดตข้อมูลตามคำสั่ง SQL ใหม่ของคุณเรียบร้อยแล้ว')
@@ -1837,6 +1904,8 @@ const runDraftQuery = async () => {
       generatedResult.value.previewCount = response.totalCount
       generatedResult.value.status = 'success'
       showPreview.value = true
+      previewSearch.value = ''
+      showAllRows.value = false
       activeTab.value = 3
 
       toast.success('ดึงข้อมูลสำเร็จ', 'ระบบประมวลผลข้อมูลตามคำสั่ง SQL เรียบร้อยแล้ว')
@@ -1915,6 +1984,40 @@ const highlightOnlySql = (sqlStr: string) => {
   r = r.replace(/\x01S(\d+)\x01/g, (_, i) => `<span class="sql-hl-str">${escapeHtml(strings[parseInt(i)])}</span>`)
 
   return r
+}
+
+const highlightOnlySqlWithDiff = (editedSql: string): string => {
+  if (!editedSql) return ''
+  const originalFormatted = formatSql(generatedResult.value?.sql ?? '')
+  const origLineSet = new Set(
+    originalFormatted.split('\n').map(l => l.trim()).filter(Boolean)
+  )
+  return editedSql.split('\n').map(line => {
+    const highlighted = highlightOnlySql(line)
+    const isChanged = line.trim() !== '' && !origLineSet.has(line.trim())
+    return isChanged
+      ? `<span class="sql-hl-diff">${highlighted}</span>`
+      : highlighted
+  }).join('\n')
+}
+
+// Diff highlight — format + highlight + ไฮไลน์บรรทัดที่เปลี่ยน
+// baselineSql: SQL ต้นฉบับที่ใช้เปรียบเทียบ (default = generatedResult.sql)
+const highlightSqlWithDiff = (fixedSql: string, baselineSql?: string): string => {
+  if (!fixedSql) return ''
+  const formattedFixed = formatSql(fixedSql)
+  const baseline = baselineSql ?? generatedResult.value?.sql ?? ''
+  const formattedOriginal = formatSql(baseline)
+  const origLineSet = new Set(
+    formattedOriginal.split('\n').map(l => l.trim()).filter(Boolean)
+  )
+  return formattedFixed.split('\n').map(line => {
+    const highlighted = highlightOnlySql(line)
+    const isNew = line.trim() !== '' && !origLineSet.has(line.trim())
+    return isNew
+      ? `<span class="sql-hl-diff">${highlighted}</span>`
+      : highlighted
+  }).join('\n')
 }
 
 const syncHighlightScroll = () => {
@@ -2671,7 +2774,7 @@ const highlightSql = (sqlStr: string) => {
                 </button>
               </div>
             </div>
-            <div class="sql-panel-content p-3 flex-1">
+            <div class="sql-panel-content p-3 flex-1" :class="isSqlEditorExpanded ? 'flex flex-col overflow-hidden' : ''">
               <!-- SQL Error in editor panel -->
               <div v-if="generatedResult.status === 'error'" class="mb-3 space-y-2">
                 <!-- Error banner + action buttons -->
@@ -2716,8 +2819,8 @@ const highlightSql = (sqlStr: string) => {
                   </div>
                   <div v-if="sqlFixInTabSuggestion.fixedSql" class="space-y-2">
                     <p class="text-[9px] font-black text-amber-600 dark:text-amber-500 uppercase tracking-widest">SQL ที่แก้ไขแล้ว</p>
-                    <div class="bg-slate-950 rounded-lg p-3 font-mono text-xs text-emerald-400 overflow-x-auto max-h-40 overflow-y-auto">
-                      <pre class="whitespace-pre-wrap">{{ sqlFixInTabSuggestion.fixedSql }}</pre>
+                    <div class="bg-white dark:bg-slate-950 rounded-lg p-3 font-mono text-xs overflow-x-auto max-h-40 overflow-y-auto border border-slate-200 dark:border-slate-800">
+                      <pre class="whitespace-pre-wrap leading-relaxed" v-html="highlightSqlWithDiff(sqlFixInTabSuggestion.fixedSql ?? '')"></pre>
                     </div>
                     <button @click="applyAiFixInTab"
                       class="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-black rounded-lg transition-all active:scale-95 uppercase tracking-widest">
@@ -2727,62 +2830,76 @@ const highlightSql = (sqlStr: string) => {
                   </div>
                 </div>
               </div>
-              <div class="sql-editor-wrap rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 focus-within:ring-2 focus-within:ring-blue-500/40 focus-within:border-blue-400 transition-colors">
+              <div class="sql-editor-wrap rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 focus-within:ring-2 focus-within:ring-blue-500/40 focus-within:border-blue-400 transition-colors" :class="isSqlEditorExpanded ? 'sql-editor-wrap-expanded' : ''">
+                <button v-if="!isResultFullscreen" @click="isSqlEditorExpanded = !isSqlEditorExpanded"
+                  class="absolute top-1.5 right-1.5 z-20 p-1 rounded bg-white/80 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-slate-400 hover:text-blue-600 transition-all backdrop-blur-sm"
+                  :title="isSqlEditorExpanded ? 'ย่อ SQL Editor' : 'ขยาย SQL Editor'">
+                  <component :is="isSqlEditorExpanded ? Minimize2 : Maximize2" class="w-3 h-3" />
+                </button>
                 <pre ref="sqlHighlightRef" aria-hidden="true" class="sql-editor-pre dark:!text-slate-200"
-                     v-html="highlightOnlySql(editableSql)"></pre>
+                     v-html="isSqlEditedFromOriginal ? highlightOnlySqlWithDiff(editableSql) : highlightOnlySql(editableSql)"></pre>
                 <textarea ref="sqlEditorRef" v-model="editableSql" @scroll="syncHighlightScroll"
                   spellcheck="false" autocomplete="off"
                   class="sql-editor-textarea focus:outline-none"></textarea>
               </div>
 
-              <!-- SQL Chat Panel -->
-              <div v-if="isSqlChatOpen" class="mt-3 border border-violet-200 dark:border-violet-800/40 rounded-lg overflow-hidden flex flex-col" style="max-height: 320px;">
-                <!-- Header -->
-                <div class="px-3 py-2 bg-violet-50 dark:bg-violet-900/20 border-b border-violet-200 dark:border-violet-800/40 flex items-center gap-2 shrink-0">
-                  <MessageSquarePlus class="w-3.5 h-3.5 text-violet-500" />
-                  <span class="text-[10px] font-black text-violet-700 dark:text-violet-400 uppercase tracking-widest">ถามเกี่ยวกับ SQL นี้</span>
-                </div>
-                <!-- Messages -->
-                <div class="flex-1 overflow-y-auto p-3 space-y-2 bg-white dark:bg-slate-900 min-h-0">
-                  <div v-if="sqlChatMessages.length === 0" class="text-center text-xs text-slate-400 py-6">
-                    พิมพ์คำถามเกี่ยวกับ SQL นี้ เช่น "ทำไมได้ 0 รายการ?" หรือ "เพิ่ม filter วันที่ด้วย"
-                  </div>
-                  <div v-for="(msg, i) in sqlChatMessages" :key="i" :class="msg.role === 'user' ? 'flex justify-end' : 'flex justify-start'">
-                    <div :class="msg.role === 'user'
-                      ? 'max-w-[80%] px-3 py-2 bg-blue-600 text-white text-xs rounded-2xl rounded-tr-sm'
-                      : 'max-w-[90%] px-3 py-2 bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-xs rounded-2xl rounded-tl-sm space-y-2'">
-                      <p class="whitespace-pre-wrap leading-relaxed">{{ msg.text }}</p>
-                      <div v-if="msg.updatedSql" class="mt-2 space-y-1.5">
-                        <div class="bg-slate-950 rounded-lg p-2 font-mono text-[10px] text-emerald-400 max-h-28 overflow-y-auto">
-                          <pre class="whitespace-pre-wrap">{{ msg.updatedSql }}</pre>
-                        </div>
-                        <button @click="applySqlFromChat(msg.updatedSql!)"
-                          class="flex items-center gap-1 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-black rounded-lg transition-all active:scale-95">
-                          <CheckCircle2 class="w-3 h-3" /> ใช้ SQL นี้
-                        </button>
-                      </div>
+            </div>
+          </div>
+
+          <!-- Right: Chat Panel (แสดงเมื่อ isSqlChatOpen) -->
+          <div v-if="isSqlChatOpen"
+               class="md:flex-1 flex flex-col transition-all duration-200 overflow-hidden border-t md:border-t-0 md:border-l border-slate-200 dark:border-slate-800">
+            <!-- Header -->
+            <div class="w-full flex items-center justify-between px-3 py-2.5 border-b border-slate-200 dark:border-slate-800 shrink-0 bg-violet-50/60 dark:bg-violet-900/10">
+              <span class="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.3em] text-violet-600 dark:text-violet-400">
+                <MessageSquarePlus class="w-3.5 h-3.5" /> ถามเกี่ยวกับ SQL นี้
+              </span>
+              <button type="button" @click="isSqlChatOpen = false"
+                class="p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all"
+                title="ปิดแชต">
+                <X class="w-4 h-4" />
+              </button>
+            </div>
+            <!-- Messages -->
+            <div class="flex-1 overflow-y-auto p-3 space-y-2 bg-white dark:bg-slate-900 min-h-0">
+              <div v-if="sqlChatMessages.length === 0" class="text-center text-xs text-slate-400 py-8">
+                พิมพ์คำถามเกี่ยวกับ SQL นี้<br>เช่น "ทำไมได้ 0 รายการ?" หรือ "เพิ่ม filter วันที่ด้วย"
+              </div>
+              <div v-for="(msg, i) in sqlChatMessages" :key="i" :class="msg.role === 'user' ? 'flex justify-end' : 'flex justify-start'">
+                <div :class="msg.role === 'user'
+                  ? 'max-w-[85%] px-3 py-2 bg-blue-600 text-white text-xs rounded-2xl rounded-tr-sm'
+                  : 'max-w-[95%] px-3 py-2 bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-xs rounded-2xl rounded-tl-sm space-y-2'">
+                  <p class="whitespace-pre-wrap leading-relaxed">{{ msg.text }}</p>
+                  <div v-if="msg.updatedSql" class="mt-2 space-y-1.5">
+                    <div class="bg-white dark:bg-slate-950 rounded-lg p-2 font-mono text-[10px] overflow-x-auto max-h-28 overflow-y-auto border border-slate-200 dark:border-slate-800">
+                      <pre class="whitespace-pre-wrap leading-relaxed" v-html="highlightSqlWithDiff(msg.updatedSql ?? '', editableSql)"></pre>
                     </div>
+                    <button @click="applySqlFromChat(msg.updatedSql!)"
+                      class="flex items-center gap-1 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-black rounded-lg transition-all active:scale-95">
+                      <CheckCircle2 class="w-3 h-3" /> ใช้ SQL นี้
+                    </button>
                   </div>
-                  <div v-if="isSqlChatLoading" class="flex justify-start">
-                    <div class="px-3 py-2 bg-slate-100 dark:bg-slate-800 rounded-2xl rounded-tl-sm flex items-center gap-1.5">
-                      <Loader2 class="w-3 h-3 text-violet-500 animate-spin" />
-                      <span class="text-xs text-slate-500">AI กำลังคิด...</span>
-                    </div>
-                  </div>
-                </div>
-                <!-- Input -->
-                <div class="px-3 py-2 border-t border-violet-200 dark:border-violet-800/40 bg-violet-50/50 dark:bg-violet-900/10 flex gap-2 shrink-0">
-                  <textarea v-model="sqlChatInput"
-                    @keydown.enter.exact.prevent="sendSqlChat"
-                    rows="1"
-                    placeholder="ถาม AI เกี่ยวกับ SQL นี้... (Enter ส่ง, Shift+Enter ขึ้นบรรทัด)"
-                    class="flex-1 resize-none bg-white dark:bg-slate-800 border border-violet-200 dark:border-violet-700 rounded-lg px-3 py-1.5 text-xs text-slate-800 dark:text-slate-200 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-400/40"></textarea>
-                  <button @click="sendSqlChat" :disabled="!sqlChatInput.trim() || isSqlChatLoading"
-                    class="px-3 py-1.5 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white text-xs font-black rounded-lg transition-all active:scale-95 shrink-0">
-                    ส่ง
-                  </button>
                 </div>
               </div>
+              <div v-if="isSqlChatLoading" class="flex justify-start">
+                <div class="px-3 py-2 bg-slate-100 dark:bg-slate-800 rounded-2xl rounded-tl-sm flex items-center gap-1.5">
+                  <Loader2 class="w-3 h-3 text-violet-500 animate-spin" />
+                  <span class="text-xs text-slate-500">AI กำลังคิด...</span>
+                </div>
+              </div>
+            </div>
+            <!-- Input -->
+            <div class="px-3 py-2 border-t border-slate-200 dark:border-slate-800 bg-violet-50/50 dark:bg-violet-900/10 flex gap-2 shrink-0">
+              <textarea v-model="sqlChatInput"
+                ref="sqlChatInputRef"
+                @keydown.enter.exact.prevent="sendSqlChat"
+                rows="2"
+                placeholder="ถาม AI เกี่ยวกับ SQL นี้... (Enter ส่ง)"
+                class="flex-1 resize-none bg-white dark:bg-slate-800 border border-violet-200 dark:border-violet-700 rounded-lg px-3 py-1.5 text-xs text-slate-800 dark:text-slate-200 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-400/40"></textarea>
+              <button @click="sendSqlChat" :disabled="!sqlChatInput.trim() || isSqlChatLoading"
+                class="px-3 py-2 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white text-xs font-black rounded-lg transition-all active:scale-95 shrink-0 self-end">
+                <Send class="w-3.5 h-3.5" />
+              </button>
             </div>
           </div>
         </div>
@@ -2837,40 +2954,58 @@ const highlightSql = (sqlStr: string) => {
 
         <!-- Data Preview Table -->
         <div v-if="generatedResult.previewData" class="p-4 border-b border-slate-200 dark:border-slate-800">
-          <div class="flex items-center justify-between mb-3">
-            <div class="flex items-center gap-3">
-              <div class="w-8 h-8 rounded-xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-500 border border-slate-200 dark:border-slate-700">
-                <Database class="w-4 h-4" />
-              </div>
-              <div>
-                <div class="text-[9px] font-black uppercase tracking-[0.3em] text-slate-400 mb-0.5">Data Insights</div>
-                <h4 class="text-sm font-bold text-slate-900 dark:text-white">ตัวอย่างข้อมูล {{ generatedResult.previewData.length }} รายการแรก</h4>
-              </div>
+          <div class="flex items-center gap-3 mb-3">
+            <div class="w-8 h-8 rounded-xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-500 border border-slate-200 dark:border-slate-700 shrink-0">
+              <Database class="w-4 h-4" />
             </div>
+            <div class="shrink-0">
+              <div class="text-[9px] font-black uppercase tracking-[0.3em] text-slate-400 mb-0.5">Data Insights</div>
+              <h4 class="text-sm font-bold text-slate-900 dark:text-white">
+                ตัวอย่างข้อมูล {{ generatedResult.previewData.length }} รายการแรก
+                <span v-if="previewSearch.trim()" class="text-blue-500 dark:text-blue-400 font-normal ml-1">(พบ {{ filteredPreviewData.length }} รายการ)</span>
+              </h4>
+            </div>
+            <!-- ช่องค้นหา — อยู่ตรงกลาง ขยายเต็มพื้นที่ว่าง -->
+            <div v-if="showPreview" class="flex-1 relative mx-2">
+              <Search class="absolute left-3 inset-y-0 m-auto w-4 h-4 text-slate-400 pointer-events-none" />
+              <input
+                v-model="previewSearch"
+                type="text"
+                placeholder="ค้นหาในข้อมูล..."
+                class="w-full pl-9 pr-4 py-2 text-sm bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-slate-800 dark:text-slate-200 placeholder-slate-400"
+              />
+            </div>
+            <div v-else class="flex-1"></div>
             <button @click="showPreview = !showPreview"
-              class="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all flex items-center gap-2 text-sm font-bold text-slate-600 dark:text-slate-300">
+              class="shrink-0 px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all flex items-center gap-2 text-sm font-bold text-slate-600 dark:text-slate-300">
               <component :is="showPreview ? X : Wand2" class="w-4 h-4" />
               {{ showPreview ? 'ซ่อนตัวอย่าง' : 'แสดงตัวอย่างข้อมูล' }}
             </button>
           </div>
           <transition name="fade">
-            <div v-if="showPreview" class="overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-800 bg-white/50 dark:bg-slate-950/50 backdrop-blur-sm max-h-[400px] overflow-y-auto custom-scrollbar">
-              <table class="w-full text-left border-collapse">
-                <thead>
-                  <tr class="bg-slate-50/50 dark:bg-slate-900/50 sticky top-0 z-10 backdrop-blur-md">
-                    <th v-for="(val, key) in (generatedResult.previewData?.[0] ?? {})" :key="key" class="px-5 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest border-b border-slate-200 dark:border-slate-800">
-                      {{ key }}
-                    </th>
-                  </tr>
-                </thead>
-                <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
-                  <tr v-for="(row, idx) in generatedResult.previewData" :key="idx" class="hover:bg-blue-50/30 dark:hover:bg-blue-900/10 transition-colors">
-                    <td v-for="(val, key) in row" :key="key" class="px-5 py-2.5 text-xs font-medium text-slate-700 dark:text-slate-300">
-                      {{ val }}
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
+            <div v-if="showPreview">
+              <!-- ตาราง -->
+              <div class="overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-800 bg-white/50 dark:bg-slate-950/50 backdrop-blur-sm custom-scrollbar max-h-[400px] overflow-y-auto">
+                <table class="w-full text-left border-collapse">
+                  <thead>
+                    <tr class="bg-slate-50/50 dark:bg-slate-900/50 sticky top-0 z-10 backdrop-blur-md">
+                      <th v-for="(val, key) in (generatedResult.previewData?.[0] ?? {})" :key="key" class="px-5 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest border-b border-slate-200 dark:border-slate-800">
+                        {{ key }}
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
+                    <tr v-for="(row, idx) in filteredPreviewData" :key="idx" class="hover:bg-blue-50/30 dark:hover:bg-blue-900/10 transition-colors">
+                      <td v-for="(val, key) in row" :key="key" class="px-5 py-2.5 text-xs font-medium text-slate-700 dark:text-slate-300 tabular-nums">
+                        {{ formatCellValue(val, key) }}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+                <div v-if="filteredPreviewData.length === 0 && previewSearch.trim()" class="py-10 text-center text-sm text-slate-400">
+                  ไม่พบข้อมูลที่ตรงกับ "{{ previewSearch }}"
+                </div>
+              </div>
             </div>
           </transition>
         </div>
@@ -3195,7 +3330,7 @@ const highlightSql = (sqlStr: string) => {
                     zoho_sheet
                   </div>
                 </div>
-                <button @click="isZohoModalOpen = false; zohoSuccessDone = false" class="p-2 hover:bg-slate-100 dark:hover:bg-white/5 rounded-full transition-colors text-slate-400 dark:text-white/50">
+                <button @click="isZohoModalOpen = false; zohoSuccessDone = false; zohoResultLink = ''" class="p-2 hover:bg-slate-100 dark:hover:bg-white/5 rounded-full transition-colors text-slate-400 dark:text-white/50">
                   <X class="w-5 h-5" />
                 </button>
               </div>
@@ -3209,8 +3344,17 @@ const highlightSql = (sqlStr: string) => {
                   <p class="text-base font-black text-slate-900 dark:text-white">อัพโหลดสำเร็จ!</p>
                   <p class="text-sm text-slate-500 dark:text-slate-400 leading-relaxed">ระบบอนุมัติคำขอนี้อัตโนมัติ<br>บันทึกลงประวัติการใช้งานและอัพโหลดไปยัง Zoho WorkDrive เรียบร้อยแล้ว</p>
                 </div>
+                <a v-if="zohoResultLink"
+                  :href="zohoResultLink"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="flex items-center gap-2 px-6 py-3 bg-white dark:bg-slate-800 border border-emerald-200 dark:border-emerald-700 text-emerald-600 dark:text-emerald-400 text-sm font-bold rounded-xl hover:bg-emerald-50 dark:hover:bg-emerald-900/20 transition-all shadow-sm"
+                >
+                  <LayoutGrid class="w-4 h-4" />
+                  เปิดไฟล์ใน Zoho WorkDrive
+                </a>
                 <button
-                  @click="isZohoModalOpen = false; zohoSuccessDone = false; generatedResult = null"
+                  @click="navigateTo('/history')"
                   class="px-8 py-3 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold rounded-xl transition-all"
                 >
                   ปิด
@@ -3291,18 +3435,24 @@ const highlightSql = (sqlStr: string) => {
               </div>
 
               <!-- Footer -->
-              <div v-if="!zohoSuccessDone" class="p-6 flex items-center justify-end gap-3 bg-slate-50 dark:bg-white/[0.02]">
-                <button @click="isZohoModalOpen = false; zohoSuccessDone = false" class="px-7 py-3.5 text-sm font-bold text-slate-500 dark:text-white/50 hover:bg-slate-100 dark:hover:bg-white/5 rounded-xl transition-all border border-slate-200 dark:border-white/10">
-                  Cancel
-                </button>
-                <button
-                  @click="handleZohoExport"
-                  :disabled="isExportingZoho"
-                  class="px-8 py-3.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-sm font-bold text-white rounded-xl transition-all shadow-lg shadow-emerald-500/20 flex items-center gap-2"
-                >
-                  <Loader2 v-if="isExportingZoho" class="w-4 h-4 animate-spin" />
-                  {{ isExportingZoho ? 'Creating...' : 'Create' }}
-                </button>
+              <div v-if="!zohoSuccessDone" class="p-6 space-y-3 bg-slate-50 dark:bg-white/[0.02]">
+                <label class="flex items-center gap-2.5 cursor-pointer select-none px-1">
+                  <input v-model="zohoSkipEmail" type="checkbox" class="w-4 h-4 rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500 cursor-pointer shrink-0" />
+                  <span class="text-xs font-medium text-slate-500 dark:text-slate-400">ไม่ต้องส่งเมลล์แจ้งเจ้าของไฟล์</span>
+                </label>
+                <div class="flex items-center justify-end gap-3">
+                  <button @click="isZohoModalOpen = false; zohoSuccessDone = false; zohoSkipEmail = false; zohoResultLink = ''" class="px-7 py-3.5 text-sm font-bold text-slate-500 dark:text-white/50 hover:bg-slate-100 dark:hover:bg-white/5 rounded-xl transition-all border border-slate-200 dark:border-white/10">
+                    Cancel
+                  </button>
+                  <button
+                    @click="handleZohoExport"
+                    :disabled="isExportingZoho"
+                    class="px-8 py-3.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-sm font-bold text-white rounded-xl transition-all shadow-lg shadow-emerald-500/20 flex items-center gap-2"
+                  >
+                    <Loader2 v-if="isExportingZoho" class="w-4 h-4 animate-spin" />
+                    {{ isExportingZoho ? 'Creating...' : 'Create' }}
+                  </button>
+                </div>
               </div>
 
               <!-- Result Link (If exists) -->
@@ -3382,8 +3532,8 @@ const highlightSql = (sqlStr: string) => {
     <ClientOnly>
       <Teleport to="body">
         <transition name="modal">
-          <div v-if="isSchemaModalOpen" class="fixed inset-0 z-[150] flex items-center justify-center p-4 md:p-10 bg-slate-900/80" @click.self="isSchemaModalOpen = false">
-            <div class="bg-white dark:bg-slate-900 rounded-[2rem] shadow-2xl w-full max-w-5xl max-h-[85vh] overflow-hidden flex flex-col border border-slate-200 dark:border-slate-800 animate-in zoom-in-95 duration-300" @click.stop>
+          <div v-if="isSchemaModalOpen" class="fixed inset-0 z-[150] flex items-start justify-center p-4 md:pt-[5vh] bg-slate-900/80" @click.self="isSchemaModalOpen = false">
+            <div class="bg-white dark:bg-slate-900 rounded-[2rem] shadow-2xl w-full max-w-5xl max-h-[85vh] overflow-hidden flex flex-col self-start border border-slate-200 dark:border-slate-800 animate-in zoom-in-95 duration-300" @click.stop>
               <!-- Header -->
               <div class="px-6 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0 bg-slate-50/50 dark:bg-slate-900/50">
                 <div class="flex items-center gap-3">
@@ -3412,8 +3562,16 @@ const highlightSql = (sqlStr: string) => {
                         v-model="schemaTableSearch"
                         type="text"
                         placeholder="ค้นหาตาราง..."
-                        class="w-full pl-8 pr-3 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-400 text-slate-800 dark:text-slate-200 placeholder-slate-400"
+                        class="w-full pl-8 pr-8 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-400 text-slate-800 dark:text-slate-200 placeholder-slate-400"
                       />
+                      <button
+                        v-if="schemaTableSearch"
+                        type="button"
+                        @click="schemaTableSearch = ''"
+                        class="absolute right-2 inset-y-0 my-auto w-5 h-5 flex items-center justify-center rounded text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 outline-none transition-colors"
+                      >
+                        <X class="w-3 h-3 pointer-events-none" />
+                      </button>
                     </div>
                   </div>
                   <!-- Table List -->
@@ -3660,9 +3818,15 @@ const highlightSql = (sqlStr: string) => {
                   <div class="flex-1 h-px bg-slate-200 dark:bg-white/10"></div>
                 </div>
 
+                <!-- Checkbox skip email -->
+                <label class="flex items-center gap-2.5 cursor-pointer select-none px-1">
+                  <input v-model="csvSkipEmail" type="checkbox" class="w-4 h-4 rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500 cursor-pointer shrink-0" />
+                  <span class="text-xs font-medium text-slate-500 dark:text-slate-400">ไม่ต้องส่งเมลล์แจ้งเจ้าของไฟล์</span>
+                </label>
+
                 <div class="flex items-center justify-end gap-3">
                   <button
-                    @click="isCsvConfirmModalOpen = false; csvSuccessDone = false"
+                    @click="isCsvConfirmModalOpen = false; csvSuccessDone = false; csvSkipEmail = false"
                     class="px-7 py-3.5 text-sm font-bold text-slate-500 dark:text-white/50 hover:bg-slate-100 dark:hover:bg-white/5 rounded-xl transition-all border border-slate-200 dark:border-white/10"
                   >
                     ยกเลิก
@@ -4663,6 +4827,27 @@ textarea::placeholder {
 :global(.dark .sql-hl-str) { color: #86efac; }             /* green-300 */
 :global(.sql-hl-num) { color: #d97706; }                   /* amber-600 */
 :global(.dark .sql-hl-num) { color: #fcd34d; }             /* amber-300 */
+
+/* Diff highlighting — บรรทัดที่ถูกแก้ไข/เพิ่ม */
+:global(.sql-hl-diff) {
+  display: inline-block;
+  min-width: 100%;
+  background: rgba(234, 179, 8, 0.13);
+}
+:global(.dark .sql-hl-diff) {
+  background: rgba(234, 179, 8, 0.09);
+}
+
+/* Expand SQL Editor within its panel column */
+.sql-editor-wrap-expanded {
+  flex: 1;
+  min-height: 0;
+}
+.sql-editor-wrap-expanded .sql-editor-textarea {
+  height: 100%;
+  min-height: 0 !important;
+  resize: none !important;
+}
 
 /* Data Guide Styling */
 :deep(.data-guide-content h2) {

@@ -94,8 +94,8 @@ export default defineEventHandler(async (event) => {
         .where(eq(aiQueryRequests.id, requestId));
     }
 
-    // ส่งเมลล์แจ้ง owner ถ้า owner เป็นคนละคนกับผู้ login
-    if (options?.ownerVtigerId && options.ownerVtigerId !== session.vtigerId) {
+    // ส่งเมลล์แจ้ง owner ถ้า owner เป็นคนละคนกับผู้ login และไม่ได้เลือก skipEmail
+    if (!options?.skipEmail && options?.ownerVtigerId && options.ownerVtigerId !== session.vtigerId) {
       const ownerVtigerId = Number(options.ownerVtigerId);
       const ownerRecord = await db.query.users.findFirst({ where: eq(users.vtigerId, ownerVtigerId) });
       const ownerEmail = ownerRecord?.email;

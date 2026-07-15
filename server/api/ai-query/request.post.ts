@@ -64,7 +64,7 @@ async function sendOwnerNotificationEmail(opts: {
 
 export default defineEventHandler(async (event) => {
   const body = await readBody(event);
-  const { queryText, generatedSql, explanation, resultCount, requestReason, ownerVtigerId, expiresAt } = body;
+  const { queryText, generatedSql, explanation, resultCount, requestReason, ownerVtigerId, expiresAt, skipEmail } = body;
 
   if (!queryText || !generatedSql) {
     throw createError({ statusCode: 400, statusMessage: 'Missing required fields' });
@@ -128,9 +128,9 @@ export default defineEventHandler(async (event) => {
           }
         }
 
-        // ส่งเมลล์แจ้ง owner ถ้า owner เป็นคนละคนกับผู้ login
+        // ส่งเมลล์แจ้ง owner ถ้า owner เป็นคนละคนกับผู้ login และไม่ได้เลือก skipEmail
         const baseUrl = process.env.APP_URL || 'http://localhost:3000';
-        if (ownerVtigerId && ownerVtigerId !== session.vtigerId) {
+        if (!skipEmail && ownerVtigerId && ownerVtigerId !== session.vtigerId) {
           sendOwnerNotificationEmail({
             ownerVtigerId: Number(ownerVtigerId),
             createdByDisplayName: session.displayName as string,
