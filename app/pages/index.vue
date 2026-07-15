@@ -46,7 +46,8 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Zap,
-  FileText
+  FileText,
+  Table2
 } from 'lucide-vue-next'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
@@ -74,6 +75,22 @@ const isTipsModalOpen = ref(false)
 const isDataGuideModalOpen = ref(false)
 const dataGuideContent = ref('')
 const isLoadingDataGuide = ref(false)
+
+// Schema Explorer Modal
+const isSchemaModalOpen = ref(false)
+const schemaTableSearch = ref('')
+const schemaSelectedTable = ref<string | null>(null)
+const schemaTableList = ref<string[]>([])
+const schemaColumns = ref<Array<{ column: string; type: string; nullable: string; key: string; comment: string }>>([])
+const isLoadingTables = ref(false)
+const isLoadingColumns = ref(false)
+const schemaCopied = ref<string | null>(null)
+
+const copySchemaText = (text: string) => {
+  navigator.clipboard.writeText(text)
+  schemaCopied.value = text
+  setTimeout(() => { schemaCopied.value = null }, 1500)
+}
 const isReportingError = ref(false)
 const isZohoModalOpen = ref(false)
 const zohoOptions = ref({
@@ -919,6 +936,45 @@ const renderedDataGuide = computed(() => {
   if (!dataGuideContent.value) return ''
   return DOMPurify.sanitize(marked.parse(dataGuideContent.value) as string)
 })
+
+// Schema Explorer
+const filteredSchemaTables = computed(() =>
+  schemaTableList.value.filter(t =>
+    t.includes(schemaTableSearch.value.toLowerCase())
+  )
+)
+
+const openSchemaModal = async () => {
+  isSchemaModalOpen.value = true
+  schemaSelectedTable.value = null
+  schemaColumns.value = []
+  schemaTableSearch.value = ''
+  if (schemaTableList.value.length === 0) {
+    isLoadingTables.value = true
+    try {
+      const data = await $fetch<{ tables: string[] }>('/api/db-schema/tables')
+      schemaTableList.value = data.tables
+    } catch {
+      toast.error('ล้มเหลว', 'ไม่สามารถดึงรายการตารางได้')
+    } finally {
+      isLoadingTables.value = false
+    }
+  }
+}
+
+const selectSchemaTable = async (table: string) => {
+  schemaSelectedTable.value = table
+  isLoadingColumns.value = true
+  schemaColumns.value = []
+  try {
+    const data = await $fetch<{ columns: Array<{ column: string; type: string; nullable: string; key: string; comment: string }> }>('/api/db-schema/describe', { query: { table } })
+    schemaColumns.value = data.columns
+  } catch {
+    toast.error('ล้มเหลว', 'ไม่สามารถดึงข้อมูลฟิลด์ได้')
+  } finally {
+    isLoadingColumns.value = false
+  }
+}
 
 const chatContextLabel = computed(() => {
   const preview = generatedResult.value?.previewData ?? []
@@ -2041,6 +2097,15 @@ const highlightSql = (sqlStr: string) => {
                 </template>
                 <button
                   type="button"
+                  @click="openSchemaModal()"
+                  :disabled="isUpdatingSql"
+                  class="p-1.5 rounded-lg text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 border border-slate-200 dark:border-slate-700 hover:border-emerald-300 dark:hover:border-emerald-700 transition-all disabled:opacity-50"
+                  title="สำรวจตารางและฟิลด์ (Schema Explorer)"
+                >
+                  <Table2 class="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
                   @click="isDirectSqlFullscreen = true"
                   :disabled="isUpdatingSql"
                   class="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 border border-slate-200 dark:border-slate-700 hover:border-indigo-300 dark:hover:border-indigo-700 transition-all disabled:opacity-50"
@@ -2588,6 +2653,11 @@ const highlightSql = (sqlStr: string) => {
                     : 'text-slate-500 bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 hover:text-violet-600'"
                   title="ถามเกี่ยวกับ SQL นี้">
                   <MessageSquarePlus class="w-3 h-3" /> แชต
+                </button>
+                <button @click="openSchemaModal()"
+                  class="px-2 py-1 rounded text-[10px] font-bold text-emerald-600 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100 transition-all active:scale-95 flex items-center gap-1"
+                  title="สำรวจตารางและฟิลด์ (Schema Explorer)">
+                  <Table2 class="w-3 h-3" /> Schema
                 </button>
                 <button @click.stop="editableSql = formatSql(generatedResult.sql)"
                   class="px-2 py-1 rounded text-[10px] font-bold text-amber-600 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 hover:bg-amber-100 transition-all active:scale-95 flex items-center gap-1">
@@ -3301,6 +3371,155 @@ const highlightSql = (sqlStr: string) => {
                 >
                   เข้าใจแล้ว
                 </button>
+              </div>
+            </div>
+          </div>
+        </transition>
+      </Teleport>
+    </ClientOnly>
+
+    <!-- DB Schema Explorer Modal -->
+    <ClientOnly>
+      <Teleport to="body">
+        <transition name="modal">
+          <div v-if="isSchemaModalOpen" class="fixed inset-0 z-[150] flex items-center justify-center p-4 md:p-10 bg-slate-900/80" @click.self="isSchemaModalOpen = false">
+            <div class="bg-white dark:bg-slate-900 rounded-[2rem] shadow-2xl w-full max-w-5xl max-h-[85vh] overflow-hidden flex flex-col border border-slate-200 dark:border-slate-800 animate-in zoom-in-95 duration-300" @click.stop>
+              <!-- Header -->
+              <div class="px-6 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0 bg-slate-50/50 dark:bg-slate-900/50">
+                <div class="flex items-center gap-3">
+                  <div class="w-9 h-9 rounded-xl bg-emerald-600 flex items-center justify-center text-white shadow-lg shadow-emerald-500/20">
+                    <Table2 class="w-4.5 h-4.5" />
+                  </div>
+                  <div>
+                    <h3 class="text-base font-black text-slate-900 dark:text-white">DB Schema Explorer</h3>
+                    <p class="text-[10px] text-slate-500 font-medium">สำรวจตารางและฟิลด์เพื่อใช้ในการสร้างคำสั่ง SQL</p>
+                  </div>
+                </div>
+                <button @click="isSchemaModalOpen = false" class="p-2 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 transition-all">
+                  <X class="w-5 h-5" />
+                </button>
+              </div>
+
+              <!-- Body: Split Panel -->
+              <div class="flex flex-1 min-h-0">
+                <!-- Left: Table List -->
+                <div class="w-64 shrink-0 border-r border-slate-200 dark:border-slate-800 flex flex-col bg-slate-50/50 dark:bg-slate-950/30">
+                  <!-- Search -->
+                  <div class="p-3 border-b border-slate-200 dark:border-slate-800">
+                    <div class="relative">
+                      <Search class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
+                      <input
+                        v-model="schemaTableSearch"
+                        type="text"
+                        placeholder="ค้นหาตาราง..."
+                        class="w-full pl-8 pr-3 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-400 text-slate-800 dark:text-slate-200 placeholder-slate-400"
+                      />
+                    </div>
+                  </div>
+                  <!-- Table List -->
+                  <div class="flex-1 overflow-y-auto custom-scrollbar">
+                    <div v-if="isLoadingTables" class="flex items-center justify-center py-12">
+                      <Loader2 class="w-5 h-5 text-emerald-500 animate-spin" />
+                    </div>
+                    <div v-else-if="filteredSchemaTables.length === 0" class="px-4 py-8 text-center text-xs text-slate-400">
+                      ไม่พบตาราง
+                    </div>
+                    <div
+                      v-for="table in filteredSchemaTables"
+                      :key="table"
+                      :class="[
+                        'group flex items-center justify-between px-3 py-2 text-xs font-mono transition-colors border-b border-slate-100 dark:border-slate-800/60 cursor-pointer',
+                        schemaSelectedTable === table
+                          ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400 font-bold'
+                          : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/50'
+                      ]"
+                      @click="selectSchemaTable(table)"
+                    >
+                      <span class="truncate">{{ table }}</span>
+                      <button
+                        type="button"
+                        @click.stop="copySchemaText(table)"
+                        class="shrink-0 ml-1 p-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity text-slate-400 hover:text-emerald-600"
+                        :title="'Copy: ' + table"
+                      >
+                        <CheckCircle2 v-if="schemaCopied === table" class="w-3 h-3 text-emerald-500" />
+                        <Copy v-else class="w-3 h-3" />
+                      </button>
+                    </div>
+                  </div>
+                  <!-- Count badge -->
+                  <div class="px-3 py-2 border-t border-slate-200 dark:border-slate-800 text-[10px] text-slate-400 font-medium">
+                    {{ filteredSchemaTables.length }} ตาราง
+                  </div>
+                </div>
+
+                <!-- Right: Column List -->
+                <div class="flex-1 flex flex-col min-w-0">
+                  <!-- Empty state -->
+                  <div v-if="!schemaSelectedTable" class="flex-1 flex flex-col items-center justify-center text-center p-8 text-slate-400">
+                    <Table2 class="w-10 h-10 mb-3 opacity-20" />
+                    <p class="text-sm font-medium">เลือกตารางจากรายการทางซ้าย</p>
+                    <p class="text-xs mt-1 opacity-70">เพื่อดูฟิลด์และประเภทข้อมูล</p>
+                  </div>
+
+                  <!-- Loading columns -->
+                  <div v-else-if="isLoadingColumns" class="flex-1 flex items-center justify-center">
+                    <Loader2 class="w-5 h-5 text-emerald-500 animate-spin" />
+                  </div>
+
+                  <!-- Column table -->
+                  <div v-else class="flex-1 overflow-y-auto custom-scrollbar">
+                    <!-- Table name header -->
+                    <div class="px-4 py-3 border-b border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/30 flex items-center gap-2 shrink-0 sticky top-0 z-10">
+                      <Database class="w-3.5 h-3.5 text-emerald-500" />
+                      <span class="text-xs font-black text-slate-700 dark:text-slate-200 font-mono">{{ schemaSelectedTable }}</span>
+                      <span class="ml-auto text-[10px] text-slate-400">{{ schemaColumns.length }} ฟิลด์</span>
+                    </div>
+                    <!-- Columns table -->
+                    <table class="w-full text-xs">
+                      <thead>
+                        <tr class="border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 sticky top-[41px] z-10">
+                          <th class="px-4 py-2 text-left font-black text-slate-500 uppercase tracking-wider text-[10px]">Column</th>
+                          <th class="px-4 py-2 text-left font-black text-slate-500 uppercase tracking-wider text-[10px]">Type</th>
+                          <th class="px-4 py-2 text-left font-black text-slate-500 uppercase tracking-wider text-[10px]">Key</th>
+                          <th class="px-4 py-2 text-left font-black text-slate-500 uppercase tracking-wider text-[10px]">Null</th>
+                          <th class="px-4 py-2 text-left font-black text-slate-500 uppercase tracking-wider text-[10px]">Comment</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr
+                          v-for="col in schemaColumns"
+                          :key="col.column"
+                          class="group border-b border-slate-100 dark:border-slate-800/60 hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors"
+                        >
+                          <td class="px-4 py-2 font-mono font-semibold text-slate-800 dark:text-slate-200">
+                            <div class="flex items-center gap-1">
+                              <span>{{ col.column }}</span>
+                              <button
+                                type="button"
+                                @click="copySchemaText(col.column)"
+                                class="shrink-0 p-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity text-slate-400 hover:text-emerald-600"
+                                :title="'Copy: ' + col.column"
+                              >
+                                <CheckCircle2 v-if="schemaCopied === col.column" class="w-3 h-3 text-emerald-500" />
+                                <Copy v-else class="w-3 h-3" />
+                              </button>
+                            </div>
+                          </td>
+                          <td class="px-4 py-2 font-mono text-indigo-600 dark:text-indigo-400">{{ col.type }}</td>
+                          <td class="px-4 py-2">
+                            <span v-if="col.key === 'PRI'" class="px-1.5 py-0.5 rounded text-[10px] font-black bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">PRI</span>
+                            <span v-else-if="col.key === 'MUL'" class="px-1.5 py-0.5 rounded text-[10px] font-black bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">MUL</span>
+                            <span v-else-if="col.key === 'UNI'" class="px-1.5 py-0.5 rounded text-[10px] font-black bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400">UNI</span>
+                            <span v-else class="text-slate-300 dark:text-slate-600">—</span>
+                          </td>
+                          <td class="px-4 py-2 text-slate-500">{{ col.nullable === 'YES' ? 'YES' : '' }}</td>
+                          <td class="px-4 py-2 text-slate-400 italic truncate max-w-[160px]" :title="col.comment">{{ col.comment || '' }}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -4484,6 +4703,6 @@ textarea::placeholder {
   @apply absolute -left-5 text-blue-500 font-black text-xl top-[-2px] leading-none;
 }
 :deep(.prose-markdown strong) {
-  @apply text-slate-900 dark:text-white font-black px-1.5 py-0.5 bg-slate-100 dark:bg-slate-800 rounded-md shadow-sm border border-slate-200 dark:border-slate-700;
+  @apply font-medium text-indigo-600 dark:text-indigo-400 not-italic;
 }
 </style>
