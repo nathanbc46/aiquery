@@ -162,9 +162,20 @@ const isBackConfirmOpen = ref(false)
 const isFixingSqlInTab = ref(false)
 const sqlFixInTabSuggestion = ref<{ cause: string; fix: string; fixedSql: string | null } | null>(null)
 
+// Regenerate AI Analysis Summary เมื่อ SQL เปลี่ยน
+const isRegeneratingExplanation = ref(false)
+
+const toggleChatSqlExpand = (idx: number) => {
+  const s = new Set(expandedChatSqlIdxs.value)
+  s.has(idx) ? s.delete(idx) : s.add(idx)
+  expandedChatSqlIdxs.value = s
+}
+
 // SQL Chat ใน Tab 2
 const isSqlChatOpen = ref(false)
 const isSqlEditorExpanded = ref(false)
+const expandedChatSqlIdxs = ref(new Set<number>())
+const isFixSqlExpanded = ref(false)
 const sqlChatMessages = ref<{ role: 'user' | 'model'; text: string; updatedSql?: string }[]>([])
 const sqlChatInput = ref('')
 const isSqlChatLoading = ref(false)
@@ -1632,6 +1643,27 @@ const cancelGenerate = () => {
   }
 }
 
+const regenerateExplanation = async () => {
+  if (!editableSql.value || isRegeneratingExplanation.value) return
+  isRegeneratingExplanation.value = true
+  try {
+    const res = await $fetch<any>('/api/ai-query/explain-sql', {
+      method: 'POST',
+      body: { sql: editableSql.value }
+    })
+    if (res.success && generatedResult.value) {
+      generatedResult.value.explanation = res.explanation
+      toast.success('สร้างใหม่สำเร็จ', 'AI Analysis Summary อัปเดตตาม SQL ที่แก้ไขแล้ว')
+    } else {
+      toast.error('ไม่สำเร็จ', res.error || 'ไม่สามารถสร้าง AI Analysis ได้')
+    }
+  } catch (e: any) {
+    toast.error('เกิดข้อผิดพลาด', e.message || 'ไม่สามารถเชื่อมต่อ AI ได้')
+  } finally {
+    isRegeneratingExplanation.value = false
+  }
+}
+
 const revertToOriginalSql = () => {
   if (originalSql.value && generatedResult.value) {
     generatedResult.value.sql = originalSql.value
@@ -2723,16 +2755,28 @@ const highlightSql = (sqlStr: string) => {
       <!-- ── Tab 2: AI Analysis + SQL Editor ── -->
       <div v-show="activeTab === 2" class="tab2-content">
         <div v-if="generatedResult && (generatedResult.status === 'success' || generatedResult.status === 'error')"
-             class="panel-container flex flex-col md:flex-row divide-y md:divide-y-0 md:divide-x divide-slate-200 dark:divide-slate-800 min-h-[300px]">
+             class="panel-container flex flex-col md:flex-row divide-y md:divide-y-0 md:divide-x divide-slate-200 dark:divide-slate-800 min-h-[300px] max-h-[65vh]">
 
           <!-- Left: AI Analysis Summary — ซ่อนได้จริง -->
           <div v-show="isAnalysisPanelOpen"
-               class="md:flex-1 flex flex-col transition-all duration-200 overflow-hidden border-b md:border-b-0 md:border-r border-slate-200 dark:border-slate-800">
+               class="md:flex-1 min-h-0 flex flex-col transition-all duration-200 overflow-hidden border-b md:border-b-0 md:border-r border-slate-200 dark:border-slate-800">
             <div class="w-full flex items-center justify-between px-3 py-2.5 border-b border-slate-200 dark:border-slate-800 shrink-0">
               <span class="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.3em] text-slate-500">
                 <Wand2 class="w-3.5 h-3.5" /> AI Analysis Summary
               </span>
               <div class="flex items-center gap-2">
+                <!-- Regenerate button — แสดงเมื่อ SQL ถูกแก้ไข -->
+                <button
+                  v-if="isSqlEditedFromOriginal"
+                  @click="regenerateExplanation"
+                  :disabled="isRegeneratingExplanation"
+                  class="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-900/40 border border-amber-200 dark:border-amber-800 text-[10px] font-bold uppercase tracking-wider transition-all active:scale-95 disabled:opacity-60 disabled:cursor-not-allowed"
+                  title="สร้าง AI Analysis ใหม่จาก SQL ที่แก้ไข"
+                >
+                  <Loader2 v-if="isRegeneratingExplanation" class="w-3 h-3 animate-spin" />
+                  <RotateCcw v-else class="w-3 h-3" />
+                  {{ isRegeneratingExplanation ? 'กำลังสร้าง...' : 'Regenerate' }}
+                </button>
                 <button @click="copyExplanation"
                   class="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-white dark:bg-slate-800 text-slate-500 hover:text-blue-600 border border-slate-200 dark:border-slate-700 text-[10px] font-bold uppercase tracking-wider transition-all active:scale-95">
                   <Copy v-if="!isExplanationCopied" class="w-3 h-3" />
@@ -2746,14 +2790,14 @@ const highlightSql = (sqlStr: string) => {
                 </button>
               </div>
             </div>
-            <div class="p-4 flex-1 overflow-y-auto">
+            <div class="p-4 flex-1 min-h-0 overflow-y-auto">
               <div class="text-slate-700 dark:text-slate-200 text-sm leading-relaxed prose prose-slate dark:prose-invert prose-p:my-2 prose-ul:my-2 max-w-none prose-markdown"
                    v-html="renderedExplanation"></div>
             </div>
           </div>
 
           <!-- Right: SQL Editor -->
-          <div class="sql-panel md:flex-1 flex flex-col transition-all duration-200 overflow-x-hidden">
+          <div class="sql-panel md:flex-1 min-h-0 flex flex-col transition-all duration-200 overflow-x-hidden">
             <div class="w-full flex items-center justify-between px-3 py-2.5 border-b border-slate-200 dark:border-slate-800 shrink-0">
               <div class="flex items-center gap-2">
                 <!-- ปุ่มแสดง AI Analysis เมื่อซ่อนอยู่ -->
@@ -2800,7 +2844,7 @@ const highlightSql = (sqlStr: string) => {
                 </button>
               </div>
             </div>
-            <div class="sql-panel-content p-3 flex-1" :class="isSqlEditorExpanded ? 'flex flex-col overflow-hidden' : ''">
+            <div class="sql-panel-content p-3 flex-1 overflow-y-auto" :class="isSqlEditorExpanded ? 'flex flex-col overflow-hidden' : ''">
               <!-- SQL Error in editor panel -->
               <div v-if="generatedResult.status === 'error'" class="mb-3 space-y-2">
                 <!-- Error banner + action buttons -->
@@ -2845,14 +2889,30 @@ const highlightSql = (sqlStr: string) => {
                   </div>
                   <div v-if="sqlFixInTabSuggestion.fixedSql" class="space-y-2">
                     <p class="text-[9px] font-black text-amber-600 dark:text-amber-500 uppercase tracking-widest">SQL ที่แก้ไขแล้ว</p>
-                    <div class="bg-white dark:bg-slate-950 rounded-lg p-3 font-mono text-xs overflow-x-auto max-h-40 overflow-y-auto border border-slate-200 dark:border-slate-800">
-                      <pre class="whitespace-pre-wrap leading-relaxed" v-html="highlightSqlWithDiff(sqlFixInTabSuggestion.fixedSql ?? '')"></pre>
+                    <div class="relative">
+                      <div class="bg-white dark:bg-slate-950 rounded-lg p-3 font-mono text-xs overflow-auto border border-slate-200 dark:border-slate-800 resize-y"
+                           :style="isFixSqlExpanded ? 'min-height:6rem; height:auto;' : 'min-height:6rem; height:10rem;'">
+                        <pre class="whitespace-pre-wrap leading-relaxed" v-html="highlightSqlWithDiff(sqlFixInTabSuggestion.fixedSql ?? '')"></pre>
+                      </div>
+                      <button @click.stop="isFixSqlExpanded = !isFixSqlExpanded"
+                        class="absolute top-1 right-1 p-0.5 rounded bg-white/90 dark:bg-slate-900/90 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 border border-slate-200 dark:border-slate-700 hover:bg-white dark:hover:bg-slate-800 transition-all"
+                        :title="isFixSqlExpanded ? 'ย่อ' : 'ขยาย'">
+                        <Maximize2 v-if="!isFixSqlExpanded" class="w-3 h-3" />
+                        <Minimize2 v-else class="w-3 h-3" />
+                      </button>
                     </div>
-                    <button @click="applyAiFixInTab"
-                      class="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-black rounded-lg transition-all active:scale-95 uppercase tracking-widest">
-                      <CheckCircle2 class="w-3.5 h-3.5" />
-                      Confirm — ใช้ SQL นี้
-                    </button>
+                    <div class="flex items-center gap-2">
+                      <button @click="applyAiFixInTab"
+                        class="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-black rounded-lg transition-all active:scale-95 uppercase tracking-widest">
+                        <CheckCircle2 class="w-3.5 h-3.5" />
+                        Confirm — ใช้ SQL นี้
+                      </button>
+                      <button @click="sqlFixInTabSuggestion = null; isFixSqlExpanded = false"
+                        class="flex items-center gap-1.5 px-4 py-2 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 text-[10px] font-black rounded-lg border border-slate-200 dark:border-slate-700 transition-all active:scale-95 uppercase tracking-widest">
+                        <X class="w-3.5 h-3.5" />
+                        ยกเลิก
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -2898,8 +2958,17 @@ const highlightSql = (sqlStr: string) => {
                   : 'max-w-[95%] px-3 py-2 bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-xs rounded-2xl rounded-tl-sm space-y-2'">
                   <p class="whitespace-pre-wrap leading-relaxed">{{ msg.text }}</p>
                   <div v-if="msg.updatedSql" class="mt-2 space-y-1.5">
-                    <div class="bg-white dark:bg-slate-950 rounded-lg p-2 font-mono text-[10px] overflow-x-auto max-h-28 overflow-y-auto border border-slate-200 dark:border-slate-800">
-                      <pre class="whitespace-pre-wrap leading-relaxed" v-html="highlightSqlWithDiff(msg.updatedSql ?? '', editableSql)"></pre>
+                    <div class="relative">
+                      <div class="bg-white dark:bg-slate-950 rounded-lg p-2 font-mono text-[10px] overflow-auto border border-slate-200 dark:border-slate-800 resize-y"
+                           :style="expandedChatSqlIdxs.has(i) ? 'min-height:6rem; height:auto;' : 'min-height:6rem; height:7rem;'">
+                        <pre class="whitespace-pre-wrap leading-relaxed" v-html="highlightSqlWithDiff(msg.updatedSql ?? '', editableSql)"></pre>
+                      </div>
+                      <button @click.stop="toggleChatSqlExpand(i)"
+                        class="absolute top-1 right-1 p-0.5 rounded bg-white/90 dark:bg-slate-900/90 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 border border-slate-200 dark:border-slate-700 hover:bg-white dark:hover:bg-slate-800 transition-all"
+                        :title="expandedChatSqlIdxs.has(i) ? 'ย่อ' : 'ขยาย'">
+                        <Maximize2 v-if="!expandedChatSqlIdxs.has(i)" class="w-3 h-3" />
+                        <Minimize2 v-else class="w-3 h-3" />
+                      </button>
                     </div>
                     <button @click="applySqlFromChat(msg.updatedSql!)"
                       class="flex items-center gap-1 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-black rounded-lg transition-all active:scale-95">
@@ -4827,6 +4896,7 @@ textarea::placeholder {
 .result-fullscreen .panel-container {
   flex: 1;
   min-height: 0;
+  max-height: none;
 }
 .result-fullscreen .sql-panel {
   min-height: 0;
@@ -4834,17 +4904,17 @@ textarea::placeholder {
 .result-fullscreen .sql-panel-content {
   flex: 1;
   min-height: 0;
-  overflow: hidden;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
 }
 .result-fullscreen .sql-editor-wrap {
   flex: 1;
-  min-height: 0;
+  min-height: 160px;
 }
 .result-fullscreen .sql-editor-textarea {
   height: 100%;
-  min-height: 0 !important;
+  min-height: 160px !important;
   resize: none !important;
 }
 
