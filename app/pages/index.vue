@@ -56,6 +56,10 @@ import 'apexcharts/features/exports'
 import * as XLSX from 'xlsx'
 
 
+const colorMode = useColorMode()
+const isDarkMode = computed(() => colorMode.value === 'dark')
+const sqlCaretStyle = computed(() => ({ caretColor: isDarkMode.value ? '#ffffff' : '#1e293b' }))
+
 const prompt = ref('')
 const isGenerating = ref(false)
 const isOptimizing = ref(false)
@@ -2160,8 +2164,8 @@ const highlightSql = (sqlStr: string) => {
 
             <!-- Direct SQL Input -->
             <div v-else class="relative">
-              <div class="direct-sql-editor-wrap sql-editor-wrap rounded-[1.5rem] border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 focus-within:ring-4 focus-within:ring-indigo-500/10 focus-within:border-indigo-400 dark:focus-within:border-indigo-600 transition-colors overflow-hidden shadow-inner" style="min-height: 220px;">
-                <pre ref="directSqlHighlightRef" aria-hidden="true" class="sql-editor-pre"
+              <div class="direct-sql-editor-wrap sql-editor-wrap rounded-[1.5rem] border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 focus-within:ring-4 focus-within:ring-indigo-500/10 focus-within:border-indigo-400 dark:focus-within:border-indigo-600 transition-colors overflow-hidden shadow-inner" style="min-height: 220px;">
+                <pre ref="directSqlHighlightRef" aria-hidden="true" class="sql-editor-pre dark:!text-slate-200"
                      v-html="directSql ? highlightOnlySql(directSql) : ''"></pre>
                 <textarea
                   ref="directSqlEditorRef"
@@ -2173,6 +2177,7 @@ const highlightSql = (sqlStr: string) => {
                   placeholder="วางคำสั่ง SQL ที่นี่... (Ctrl+Enter เพื่อรัน)"
                   spellcheck="false" autocomplete="off"
                   class="sql-editor-textarea focus:outline-none disabled:opacity-50"
+                  :style="sqlCaretStyle"
                   :disabled="isUpdatingSql"
                 ></textarea>
               </div>
@@ -2840,7 +2845,8 @@ const highlightSql = (sqlStr: string) => {
                      v-html="isSqlEditedFromOriginal ? highlightOnlySqlWithDiff(editableSql) : highlightOnlySql(editableSql)"></pre>
                 <textarea ref="sqlEditorRef" v-model="editableSql" @scroll="syncHighlightScroll"
                   spellcheck="false" autocomplete="off"
-                  class="sql-editor-textarea focus:outline-none"></textarea>
+                  class="sql-editor-textarea focus:outline-none"
+                  :style="sqlCaretStyle"></textarea>
               </div>
 
             </div>
@@ -4347,7 +4353,7 @@ const highlightSql = (sqlStr: string) => {
       <Teleport to="body">
         <Transition name="modal">
           <div v-if="isDirectSqlFullscreen"
-               class="fixed inset-0 z-[160] flex flex-col bg-white dark:bg-slate-950"
+               class="fixed inset-0 z-[160] flex flex-col bg-white dark:bg-slate-900"
                @keydown.escape.prevent="isDirectSqlFullscreen = false">
             <!-- Header -->
             <div class="flex items-center gap-3 px-5 py-3 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 shrink-0">
@@ -4388,7 +4394,7 @@ const highlightSql = (sqlStr: string) => {
 
             <!-- Editor -->
             <div class="direct-sql-fs-wrap sql-editor-wrap flex-1 overflow-hidden border-b border-slate-200 dark:border-slate-800" style="min-height: 0;">
-              <pre ref="directSqlFsHighlightRef" aria-hidden="true" class="sql-editor-pre"
+              <pre ref="directSqlFsHighlightRef" aria-hidden="true" class="sql-editor-pre dark:!text-slate-200"
                    v-html="directSql ? highlightOnlySql(directSql) : ''"></pre>
               <textarea
                 ref="directSqlFsEditorRef"
@@ -4400,6 +4406,7 @@ const highlightSql = (sqlStr: string) => {
                 placeholder="วางหรือพิมพ์คำสั่ง SQL ที่นี่..."
                 spellcheck="false" autocomplete="off"
                 class="sql-editor-textarea focus:outline-none"
+                :style="sqlCaretStyle"
               ></textarea>
             </div>
 
@@ -4768,24 +4775,24 @@ textarea::placeholder {
 
 /* ── Direct SQL Editor (Light Theme) ────────────────────── */
 .direct-sql-editor-wrap .sql-editor-pre { color: #334155; /* slate-700 */ }
-:global(.dark) .direct-sql-editor-wrap .sql-editor-pre { color: #cbd5e1; /* slate-300 */ }
+:global(.dark) .direct-sql-editor-wrap .sql-editor-pre { color: #e2e8f0; /* slate-200 */ }
 .direct-sql-editor-wrap .sql-editor-textarea {
   min-height: 220px;
   caret-color: #1e293b;
 }
-:global(.dark) .direct-sql-editor-wrap .sql-editor-textarea { caret-color: #e2e8f0; }
+:global(.dark) .direct-sql-editor-wrap .sql-editor-textarea { caret-color: #ffffff; }
 .direct-sql-editor-wrap .sql-editor-textarea::placeholder { color: #94a3b8; opacity: 1; }
 
 /* ── Direct SQL Fullscreen Editor ───────────────────────── */
 .direct-sql-fs-wrap .sql-editor-pre { color: #334155; }
-:global(.dark) .direct-sql-fs-wrap .sql-editor-pre { color: #cbd5e1; }
+:global(.dark) .direct-sql-fs-wrap .sql-editor-pre { color: #e2e8f0; }
 .direct-sql-fs-wrap .sql-editor-textarea {
   height: 100%;
   min-height: 0 !important;
   resize: none !important;
   caret-color: #1e293b;
 }
-:global(.dark) .direct-sql-fs-wrap .sql-editor-textarea { caret-color: #e2e8f0; }
+:global(.dark) .direct-sql-fs-wrap .sql-editor-textarea { caret-color: #ffffff; }
 .direct-sql-fs-wrap .sql-editor-textarea::placeholder { color: #94a3b8; opacity: 1; }
 
 /* ── Fullscreen SQL Editor Height Expansion ─────────────── */
