@@ -21,7 +21,8 @@ export default defineEventHandler(async (event) => {
     isDebugMode,
     customHints,
     agenticModel,
-    generateMode
+    generateMode,
+    agenticMaxIterations
   } = body;
 
   try {
@@ -46,7 +47,8 @@ export default defineEventHandler(async (event) => {
           isDebugMode,
           customHints: customHints ?? null,
           agenticModel: agenticModel ?? 'gemini-2.5-flash',
-          generateMode: generateMode ?? 'agentic'
+          generateMode: generateMode ?? 'agentic',
+          agenticMaxIterations: agenticMaxIterations ?? 12
         })
         .where(eq(aiSettings.id, 'global'));
     } else {
@@ -67,7 +69,8 @@ export default defineEventHandler(async (event) => {
         isDebugMode,
         customHints: customHints ?? null,
         agenticModel: agenticModel ?? 'gemini-2.5-flash',
-        generateMode: generateMode ?? 'agentic'
+        generateMode: generateMode ?? 'agentic',
+        agenticMaxIterations: agenticMaxIterations ?? 12
       });
     }
 

@@ -43,7 +43,8 @@ const settings = ref({
   isDebugMode: false,
   customHints: '',
   agenticModel: 'gemini-2.5-flash',
-  generateMode: 'agentic' as 'agentic' | 'static'
+  generateMode: 'agentic' as 'agentic' | 'static',
+  agenticMaxIterations: 12
 })
 
 const availableModels = ref<string[]>([])
@@ -447,6 +448,22 @@ onMounted(() => {
                     {{ m }}
                   </button>
                 </div>
+              </div>
+            </div>
+
+            <!-- Max Iterations — แสดงเฉพาะ Agentic mode -->
+            <div v-show="settings.generateMode === 'agentic'" class="space-y-1.5">
+              <label class="text-[10px] font-black text-slate-400 uppercase tracking-widest">Max Tool-Call Iterations</label>
+              <p class="text-[11px] text-slate-500">จำนวนรอบสูงสุดที่ AI สามารถเรียก Tool (เช็ค Schema / ตาราง) ก่อนสร้าง SQL — ค่าแนะนำ 8–20</p>
+              <div class="flex items-center gap-3">
+                <input
+                  v-model.number="settings.agenticMaxIterations"
+                  type="number"
+                  min="1"
+                  max="50"
+                  class="w-28 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-violet-400/40 font-medium"
+                />
+                <span class="text-xs text-slate-400">รอบ (default: 12)</span>
               </div>
             </div>
 

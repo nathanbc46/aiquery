@@ -66,6 +66,7 @@ export const aiSettings = mysqlTable('ai_settings', {
   customHints: text('custom_hints'),
   agenticModel: varchar('agentic_model', { length: 100 }).default('gemini-2.5-flash'),
   generateMode: varchar('generate_mode', { length: 10 }).default('agentic'),
+  agenticMaxIterations: int('agentic_max_iterations').default(12),
   updatedAt: timestamp('updated_at').defaultNow().onUpdateNow(),
 });
 

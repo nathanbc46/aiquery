@@ -3,7 +3,8 @@ import { createEventStream } from 'h3'
 import {
   DEFAULT_AGENTIC_SYSTEM_PROMPT,
   DEFAULT_AGENTIC_MODEL,
-  DEFAULT_MAX_RESULTS_LIMIT
+  DEFAULT_MAX_RESULTS_LIMIT,
+  DEFAULT_AGENTIC_MAX_ITERATIONS
 } from '../../utils/constants'
 import { useDb } from '../../utils/db'
 import { sql, eq } from 'drizzle-orm'
@@ -11,7 +12,7 @@ import { aiSettings } from '../../utils/schema'
 import { getAuthSession } from '../../utils/auth'
 import { TOOL_DECLARATIONS, dispatchTool } from '../../utils/schemaTools'
 
-const MAX_ITERATIONS = 12
+// MAX_ITERATIONS ถูก override จาก admin settings (agenticMaxIterations)
 const FORBIDDEN_KEYWORDS = ['UPDATE', 'DELETE', 'DROP', 'TRUNCATE', 'ALTER', 'INSERT', 'EXEC']
 
 function cleanJson(text: string): string {
@@ -81,11 +82,13 @@ export default defineEventHandler(async (event) => {
       let maxLimit = DEFAULT_MAX_RESULTS_LIMIT
       let customHints = ''
       let agenticModelName = DEFAULT_AGENTIC_MODEL
+      let MAX_ITERATIONS = DEFAULT_AGENTIC_MAX_ITERATIONS
       try {
         const settings = await db.select().from(aiSettings).where(eq(aiSettings.id, 'global')).limit(1)
         if (settings[0]?.maxResultsLimit) maxLimit = settings[0].maxResultsLimit
         customHints = settings[0]?.customHints || ''
         if (settings[0]?.agenticModel) agenticModelName = settings[0].agenticModel
+        if (settings[0]?.agenticMaxIterations) MAX_ITERATIONS = settings[0].agenticMaxIterations
       } catch { /* ใช้ default */ }
 
       let systemInstruction = DEFAULT_AGENTIC_SYSTEM_PROMPT.replace('{MAX_LIMIT}', maxLimit.toString())
