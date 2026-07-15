@@ -104,7 +104,14 @@ export default defineEventHandler(async (event) => {
           reason: req.errorMessage,
           expiresAt: req.expiresAt ? new Date(req.expiresAt).toISOString() : null,
           isExpired,
-          time: req.createdAt ? new Date(req.createdAt).toLocaleString('th-TH') : '',
+          time: (() => {
+            if (!req.createdAt) return '';
+            const d = new Date(req.createdAt);
+            const now = new Date();
+            const isToday = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+            const timeStr = d.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
+            return isToday ? `วันนี้ ${timeStr}` : d.toLocaleString('th-TH');
+          })(),
           resultCount: req.resultCount || 0,
           downloadCount: req.downloadCount || 0,
           zohoLink: role === 'admin' ? (req.zohoLink || null) : null,

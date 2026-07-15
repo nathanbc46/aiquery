@@ -775,8 +775,8 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="space-y-10 animate-in fade-in slide-in-from-bottom-4 duration-500">
-    <header class="border-b border-slate-200 dark:border-slate-800 pb-8 flex flex-col md:flex-row md:items-end justify-between gap-4">
+  <div class="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+    <header class="border-b border-slate-200 dark:border-slate-800 pb-4 flex flex-col md:flex-row md:items-end justify-between gap-4">
       <div class="space-y-2">
         <div class="flex items-center gap-2 text-blue-600 dark:text-blue-400 font-bold uppercase tracking-widest text-xs">
           <History class="w-4 h-4" />
@@ -864,15 +864,15 @@ onUnmounted(() => {
       </transition>
 
       <!-- Grid List -->
-      <div :class="['grid gap-4 md:gap-6 transition-all duration-700 ease-in-out', isSearching ? 'opacity-30 blur-[4px] grayscale-[0.8] scale-[0.98]' : 'opacity-100 blur-0 grayscale-0 scale-100']">
+      <div :class="['grid gap-3 md:gap-4 transition-all duration-700 ease-in-out', isSearching ? 'opacity-30 blur-[4px] grayscale-[0.8] scale-[0.98]' : 'opacity-100 blur-0 grayscale-0 scale-100']">
         <div
           v-for="req in requests"
           :key="req.id"
           class="bg-white dark:bg-slate-900 rounded-[2rem] shadow-xl shadow-slate-200/50 dark:shadow-none border border-slate-200 dark:border-slate-800 overflow-hidden hover:border-blue-500/40 dark:hover:border-blue-400/40 transition-all group/card"
         >
-        <div class="p-6 md:p-8">
+        <div class="p-4 md:p-5">
           <!-- 1. Top Meta Bar (Ultra Compact) -->
-          <div class="flex items-center justify-between gap-4 mb-5 pb-4 border-b border-slate-100 dark:border-slate-800/50">
+          <div class="flex items-center justify-between gap-4 mb-3 pb-3 border-b border-slate-100 dark:border-slate-800/50">
             <div class="flex items-center gap-2 overflow-hidden">
               <div class="px-2 py-0.5 bg-slate-50 dark:bg-slate-950 rounded border border-slate-200 dark:border-slate-800 text-[9px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest shrink-0">
                 #{{ req.id.split('-')[0].toUpperCase() }}
@@ -908,9 +908,9 @@ onUnmounted(() => {
           </div>
 
           <!-- 2. Main Content Row -->
-          <div class="flex flex-col lg:flex-row gap-6 items-start">
+          <div class="flex flex-col lg:flex-row gap-4 items-start">
             <!-- Left: Query & Meta Details -->
-            <div class="flex-1 min-w-0 space-y-5">
+            <div class="flex-1 min-w-0 space-y-3">
               <h4 class="text-lg font-medium text-slate-700 dark:text-slate-300 leading-tight">"{{ req.query }}"</h4>
               
               <!-- Reason/Comment Buttons (Inline & Compact) -->
@@ -935,7 +935,7 @@ onUnmounted(() => {
                   class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-[11px] font-bold transition-all active:scale-95"
                   :class="openCommentIds.has(req.id)
                     ? req.status === 'REJECTED' ? 'bg-rose-600 text-white border-rose-600' : 'bg-emerald-600 text-white border-emerald-600'
-                    : req.status === 'REJECTED' ? 'bg-white dark:bg-slate-800 text-rose-600 border-rose-200' : 'bg-white dark:bg-slate-800 text-emerald-600 border-emerald-200 hover:bg-emerald-50/50'"
+                    : req.status === 'REJECTED' ? 'bg-white dark:bg-slate-800 text-rose-600 dark:text-rose-400 border-rose-200 dark:border-rose-800 hover:bg-rose-50/50 dark:hover:bg-rose-900/20' : 'bg-white dark:bg-slate-800 text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800 hover:bg-emerald-50/50 dark:hover:bg-emerald-900/20'"
                 >
                   <MessageSquare class="w-3.5 h-3.5" />
                   Manager Comment
@@ -953,8 +953,8 @@ onUnmounted(() => {
               </transition>
 
               <transition name="expand">
-                <div v-if="openCommentIds.has(req.id)" class="p-4 border rounded-xl" :class="req.status === 'REJECTED' ? 'bg-rose-50/40 border-rose-100' : 'bg-emerald-50/40 border-emerald-100'">
-                  <p class="text-[9px] font-black uppercase tracking-widest mb-1.5" :class="req.status === 'REJECTED' ? 'text-rose-600' : 'text-emerald-600'">Comment จาก Manager</p>
+                <div v-if="openCommentIds.has(req.id)" class="p-4 border rounded-xl" :class="req.status === 'REJECTED' ? 'bg-rose-50/40 dark:bg-rose-900/10 border-rose-100 dark:border-rose-800/50' : 'bg-emerald-50/40 dark:bg-emerald-900/10 border-emerald-100 dark:border-emerald-800/50'">
+                  <p class="text-[9px] font-black uppercase tracking-widest mb-1.5" :class="req.status === 'REJECTED' ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'">Comment จาก Manager</p>
                   <p class="text-slate-600 dark:text-slate-400 text-xs font-medium leading-relaxed">{{ req.managerComment }}</p>
                 </div>
               </transition>
@@ -974,7 +974,7 @@ onUnmounted(() => {
                 <div class="px-4 py-2 bg-slate-50 dark:bg-slate-800/30 text-slate-400 text-[11px] font-bold rounded-xl border border-dashed border-slate-200 dark:border-slate-700 flex items-center justify-center gap-2">
                   <TimerOff class="w-3.5 h-3.5" /> ลิงก์หมดอายุแล้ว
                 </div>
-                <button @click="openRenewModal(req.id)" class="w-full px-4 py-2 bg-blue-50 hover:bg-blue-600 text-blue-600 hover:text-white text-[11px] font-black uppercase tracking-widest rounded-xl border border-blue-200 transition-all flex items-center justify-center gap-2 shadow-sm">
+                <button @click="openRenewModal(req.id)" class="w-full px-4 py-2 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-600 dark:hover:bg-blue-600 text-blue-600 dark:text-blue-400 hover:text-white dark:hover:text-white text-[11px] font-black uppercase tracking-widest rounded-xl border border-blue-200 dark:border-blue-800 transition-all flex items-center justify-center gap-2 shadow-sm">
                   <RefreshCw class="w-3.5 h-3.5" /> ขอต่ออายุ
                 </button>
               </div>
@@ -1051,7 +1051,7 @@ onUnmounted(() => {
           </div>
 
           <!-- 3. AI Insights Box (Integrated) -->
-          <div class="mt-6 bg-slate-50/50 dark:bg-slate-950/30 rounded-2xl p-5 border border-slate-100 dark:border-slate-800/50 space-y-4">
+          <div class="mt-4 bg-slate-50/50 dark:bg-slate-950/30 rounded-2xl p-4 border border-slate-100 dark:border-slate-800/50 space-y-3">
             <div class="flex gap-3">
               <div class="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center shrink-0">
                 <FileSpreadsheet class="w-4 h-4 text-blue-500" />
@@ -1062,12 +1062,12 @@ onUnmounted(() => {
                   <button
                     v-if="user?.role === 'admin' || user?.role === 'manager' || authData?.user?.role === 'admin' || authData?.user?.role === 'manager'"
                     @click="openSqlModal(req.sql, req.explanation)"
-                    class="flex items-center gap-1.5 px-2 py-0.5 bg-white dark:bg-slate-800 hover:bg-slate-100 text-[9px] font-black uppercase tracking-widest rounded-md border border-slate-200 dark:border-slate-700 transition-all shadow-sm"
+                    class="flex items-center gap-1.5 px-2 py-0.5 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-[9px] font-black uppercase tracking-widest rounded-md border border-slate-200 dark:border-slate-700 transition-all shadow-sm"
                   >
                     <Code class="w-3 h-3 text-indigo-500" /> View SQL
                   </button>
                 </div>
-                <p class="text-slate-600 dark:text-slate-400 text-xs leading-relaxed line-clamp-2 hover:line-clamp-none transition-all cursor-help">{{ req.explanation }}</p>
+                <p class="text-slate-600 dark:text-slate-400 text-xs leading-relaxed line-clamp-2">{{ req.explanation }}</p>
               </div>
             </div>
 
@@ -1087,10 +1087,10 @@ onUnmounted(() => {
               </div>
 
               <div class="flex gap-2">
-                <button @click="openAnalyze(req.id)" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black border transition-all active:scale-95 text-violet-700 border-violet-200 bg-violet-50 hover:bg-violet-100">
+                <button @click="openAnalyze(req.id)" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black border transition-all active:scale-95 text-violet-700 dark:text-violet-400 border-violet-200 dark:border-violet-800 bg-violet-50 dark:bg-violet-900/20 hover:bg-violet-100 dark:hover:bg-violet-800/40">
                   <Sparkles class="w-3.5 h-3.5" /> วิเคราะห์ด้วย AI
                 </button>
-                <button @click="openChat(req.id)" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black border transition-all active:scale-95 text-blue-700 border-blue-200 bg-blue-50 hover:bg-blue-100">
+                <button @click="openChat(req.id)" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black border transition-all active:scale-95 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-800/40">
                   <Bot class="w-3.5 h-3.5" /> แชตถาม AI
                 </button>
               </div>
@@ -1249,7 +1249,7 @@ onUnmounted(() => {
             <div class="flex-1 flex flex-col p-6 bg-white dark:bg-slate-900 rounded-b-[2rem] overflow-hidden">
               <div v-if="activeModalTab === 'analyze'" class="flex-1 overflow-y-auto space-y-6 custom-scrollbar pr-1">
                   <div v-if="!analyzeState[activeModalRequestId!]?.summary && !analyzeState[activeModalRequestId!]?.loading" class="flex justify-center py-10">
-                     <button @click="analyzeData(activeModalRequestId!)" class="flex items-center gap-2 px-6 py-3 bg-violet-600 hover:bg-violet-700 text-white font-bold text-sm rounded-2xl transition-all shadow-lg shadow-violet-500/25 active:scale-95">
+                     <button @click="analyzeData(activeModalRequestId!)" class="flex items-center gap-2 px-6 py-3 bg-violet-600 hover:bg-violet-700 dark:bg-violet-700 dark:hover:bg-violet-600 text-white font-bold text-sm rounded-2xl transition-all shadow-lg shadow-violet-500/25 active:scale-95">
                         <Sparkles class="w-4 h-4" />
                         เริ่มวิเคราะห์ข้อมูลด้วย AI
                      </button>
@@ -1462,7 +1462,7 @@ onUnmounted(() => {
               <button 
                 @click="submitRenewal" 
                 :disabled="!renewReason.trim() || isRenewing"
-                class="flex-[2] flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-bold text-white bg-blue-600 hover:bg-blue-700 transition-all active:scale-95 disabled:opacity-50 shadow-lg shadow-blue-500/20"
+                class="flex-[2] flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-bold text-white bg-blue-600 hover:bg-blue-700 dark:bg-blue-700 dark:hover:bg-blue-600 transition-all active:scale-95 disabled:opacity-50 shadow-lg shadow-blue-500/20"
               >
                 <Loader2 v-if="isRenewing" class="w-5 h-5 animate-spin" />
                 <RefreshCw v-else class="w-5 h-5" />

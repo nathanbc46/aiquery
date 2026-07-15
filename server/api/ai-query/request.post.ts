@@ -111,7 +111,8 @@ export default defineEventHandler(async (event) => {
             requestId,
             status: 'APPROVED',
             managerComment: '✨ อนุมัติอัตโนมัติโดยระบบ (ผู้ขอมีสิทธิ์ Manager/Admin)',
-            expiresAt: resolvedExpiresAt
+            expiresAt: resolvedExpiresAt,
+            skipEmail: skipEmail ?? false
           }
         });
 

@@ -11,7 +11,7 @@ const escapeHtml = (str: string) =>
 
 export default defineEventHandler(async (event) => {
   const body = await readBody(event);
-  const { requestId, status, reason, expiresAt, managerComment } = body;
+  const { requestId, status, reason, expiresAt, managerComment, skipEmail } = body;
 
   if (!requestId || !status) {
     throw createError({ statusCode: 400, statusMessage: 'Missing requestId or status' });
@@ -88,7 +88,7 @@ export default defineEventHandler(async (event) => {
       .limit(1)
       .then(rows => {
         const req = rows[0];
-        if (req && req.email) {
+        if (req && req.email && !skipEmail) {
           const isApproved = status === 'APPROVED';
           sendEmail({
             to: req.email,
