@@ -21,8 +21,29 @@ const rememberMe = ref(false)
 const isLoading = ref(false)
 const errorMsg = ref('')
 const showPassword = ref(false)
+const countdownSecs = ref(0)
+let countdownTimer: ReturnType<typeof setInterval> | null = null
+
+const startCountdown = (secs: number) => {
+  countdownSecs.value = secs
+  errorMsg.value = ''
+  if (countdownTimer) clearInterval(countdownTimer)
+  countdownTimer = setInterval(() => {
+    countdownSecs.value--
+    if (countdownSecs.value <= 0) {
+      clearInterval(countdownTimer!)
+      countdownTimer = null
+      countdownSecs.value = 0
+    }
+  }, 1000)
+}
+
+onUnmounted(() => {
+  if (countdownTimer) clearInterval(countdownTimer)
+})
 
 const handleLogin = async () => {
+  if (countdownSecs.value > 0) return
   if (!username.value || !password.value) {
     errorMsg.value = 'กรุณากรอกชื่อผู้ใช้และรหัสผ่าน'
     return
@@ -32,19 +53,23 @@ const handleLogin = async () => {
   errorMsg.value = ''
 
   try {
-    const data = await $fetch('/api/auth/login', {
+    await $fetch('/api/auth/login', {
       method: 'POST',
-      body: { 
-        username: username.value, 
+      body: {
+        username: username.value,
         password: password.value,
-        rememberMe: rememberMe.value 
+        rememberMe: rememberMe.value
       }
     })
 
-    // Success - Redirect to home (หน้าดึงข้อมูลด้วยภาษาธรรมชาติ)
     navigateTo('/')
   } catch (e: any) {
-    errorMsg.value = e.data?.message || 'การเข้าสู่ระบบล้มเหลว'
+    const retryAfter = e.data?.data?.retryAfter
+    if (retryAfter) {
+      startCountdown(retryAfter)
+    } else {
+      errorMsg.value = e.data?.message || 'การเข้าสู่ระบบล้มเหลว'
+    }
   } finally {
     isLoading.value = false
   }
@@ -74,11 +99,16 @@ const handleLogin = async () => {
       <!-- Login Card -->
       <div class="bg-white dark:bg-slate-900 rounded-[2.5rem] border border-slate-200 dark:border-slate-800 p-10 shadow-2xl shadow-slate-200/50 dark:shadow-none relative overflow-hidden">
         <form @submit.prevent="handleLogin" class="space-y-6">
-          <!-- Error Alert -->
+          <!-- Error / Rate Limit Alert -->
           <transition name="fade">
-            <div v-if="errorMsg" class="p-4 bg-rose-50 dark:bg-rose-900/10 border border-rose-100 dark:border-rose-900/50 rounded-2xl flex items-center gap-3 text-rose-600 dark:text-rose-400 text-sm font-bold">
-              <AlertCircle class="w-5 h-5 shrink-0" />
-              {{ errorMsg }}
+            <div v-if="countdownSecs > 0 || errorMsg" class="p-4 bg-rose-50 dark:bg-rose-900/10 border border-rose-100 dark:border-rose-900/50 rounded-2xl flex items-start gap-3 text-rose-600 dark:text-rose-400 text-sm font-bold">
+              <AlertCircle class="w-5 h-5 shrink-0 mt-0.5" />
+              <div v-if="countdownSecs > 0">
+                พยายามเข้าสู่ระบบหลายครั้งเกินไป กรุณาลองใหม่ใน
+                <span class="font-mono text-base tabular-nums">{{ countdownSecs }}</span>
+                วินาที
+              </div>
+              <div v-else>{{ errorMsg }}</div>
             </div>
           </transition>
 
@@ -135,14 +165,15 @@ const handleLogin = async () => {
             </label>
           </div>
 
-          <button 
-            type="submit" 
-            :disabled="isLoading"
-            class="w-full py-4 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-black rounded-2xl shadow-xl shadow-blue-500/20 active:scale-[0.98] transition-all flex items-center justify-center gap-3 group"
+          <button
+            type="submit"
+            :disabled="isLoading || countdownSecs > 0"
+            class="w-full py-4 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-black rounded-2xl shadow-xl shadow-blue-500/20 active:scale-[0.98] transition-all flex items-center justify-center gap-3 group"
           >
             <Loader2 v-if="isLoading" class="w-5 h-5 animate-spin" />
+            <span v-else-if="countdownSecs > 0" class="font-mono tabular-nums">รอ {{ countdownSecs }} วินาที</span>
             <span v-else>เข้าสู่ระบบ</span>
-            <ArrowRight v-if="!isLoading" class="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+            <ArrowRight v-if="!isLoading && countdownSecs === 0" class="w-5 h-5 group-hover:translate-x-1 transition-transform" />
           </button>
         </form>
 

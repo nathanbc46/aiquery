@@ -842,11 +842,7 @@ onUnmounted(() => {
         <Clock class="w-12 h-12" />
       </div>
       <h3 class="text-2xl font-bold text-slate-900 dark:text-white">ไม่พบประวัติการขอข้อมูล</h3>
-      <p class="text-slate-500 dark:text-slate-400 mt-2 text-lg">ลองเปลี่ยนคำค้นหา หรือเริ่มต้นขอข้อมูลใหม่ได้ที่หน้าแรกครับ</p>
-      <NuxtLink to="/" class="mt-8 inline-flex items-center gap-2 px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-2xl transition-all shadow-lg shadow-blue-500/20 active:scale-95 group">
-        ไปที่หน้าขอข้อมูล
-        <ArrowRight class="w-5 h-5 group-hover:translate-x-1 transition-transform" />
-      </NuxtLink>
+      <p class="text-slate-500 dark:text-slate-400 mt-2 text-lg">ลองเปลี่ยนคำค้นหาใหม่อีกครั้งครับ</p>
     </div>
 
     <!-- Request List Content -->

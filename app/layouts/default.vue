@@ -71,14 +71,20 @@ onUnmounted(() => {
 })
 
 const navItems = computed(() => {
-  const items = [
-    { to: '/', label: 'หน้าแรก', icon: Home },
+  const isPrivileged = user.value?.role === 'admin' || user.value?.role === 'manager'
+  const items: { to: string; label: string; icon: any }[] = []
+
+  // เฉพาะ admin/manager เห็นหน้าขอข้อมูล AI
+  if (isPrivileged) {
+    items.push({ to: '/', label: 'หน้าแรก', icon: Home })
+  }
+
+  items.push(
     { to: '/dashboard', label: 'ภาพรวมระบบ', icon: LayoutDashboard },
     { to: '/history', label: 'ประวัติการใช้งาน', icon: History },
-  ]
+  )
 
-  // Show Approvals for managers/admins
-  if (user.value?.role === 'manager' || user.value?.role === 'admin') {
+  if (isPrivileged) {
     items.push({ to: '/approvals', label: 'รอการอนุมัติ', icon: CheckSquare })
   }
 
@@ -121,18 +127,6 @@ const closeMobileMenu = () => {
             </div>
             <div>
               <h1 class="text-xl font-black tracking-tighter text-slate-900 dark:text-white uppercase leading-none">AI-Query</h1>
-              <div class="flex items-center gap-1.5 mt-1.5">
-                <div class="w-2 h-2 rounded-full animate-pulse" :class="{
-                  'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]': systemStatus.status === 'online',
-                  'bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.5)]': systemStatus.status === 'offline',
-                  'bg-amber-500 animate-bounce': systemStatus.status === 'loading'
-                }"></div>
-                <span class="text-[10px] font-black uppercase tracking-widest" :class="{
-                  'text-emerald-600 dark:text-emerald-400': systemStatus.status === 'online',
-                  'text-rose-600 dark:text-rose-400': systemStatus.status === 'offline',
-                  'text-slate-400': systemStatus.status === 'loading'
-                }">DB: {{ systemStatus.database }}</span>
-              </div>
             </div>
           </div>
       </div>
@@ -259,18 +253,6 @@ const closeMobileMenu = () => {
             </div>
             <div>
               <h1 class="text-xl font-black tracking-tighter text-slate-900 dark:text-white uppercase leading-none">AI-Query</h1>
-              <div class="flex items-center gap-1.5 mt-1">
-                <div class="w-2 h-2 rounded-full" :class="{
-                  'bg-emerald-500': systemStatus.status === 'online',
-                  'bg-rose-500': systemStatus.status === 'offline',
-                  'bg-amber-500': systemStatus.status === 'loading'
-                }"></div>
-                <span class="text-[10px] font-black uppercase tracking-widest" :class="{
-                  'text-emerald-600 dark:text-emerald-400': systemStatus.status === 'online',
-                  'text-rose-600 dark:text-rose-400': systemStatus.status === 'offline',
-                  'text-slate-400': systemStatus.status === 'loading'
-                }">{{ systemStatus.database }}</span>
-              </div>
             </div>
           </div>
           <button @click="closeMobileMenu" class="p-2 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800">

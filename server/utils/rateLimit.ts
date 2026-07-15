@@ -26,6 +26,7 @@ export const checkLoginRateLimit = (event: H3Event, maxAttempts = 5, windowMs = 
     throw createError({
       statusCode: 429,
       message: `พยายามเข้าสู่ระบบหลายครั้งเกินไป กรุณาลองใหม่ใน ${waitSecs} วินาที`,
+      data: { retryAfter: waitSecs },
     });
   }
 };
