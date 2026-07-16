@@ -202,8 +202,10 @@ const uploadedFileName = ref('')
 const isParsingFile = ref(false)
 const DATA_CONTEXT_LIMIT = 200
 
-const { data: auth } = await useFetch<any>('/api/auth/me')
-const user = computed(() => auth.value?.user)
+// ใช้ auth data ที่ middleware เก็บไว้ใน useState แทนการ fetch ซ้ำ
+// หลีกเลี่ยง await useFetch ที่ทำให้ page เป็น async component → Suspense trigger middleware ซ้ำ
+const authData = useState<any>('auth-data')
+const user = computed(() => authData.value?.user)
 const isAdmin = computed(() => user.value?.role === 'admin')
 
 
@@ -870,7 +872,7 @@ const saveFavorite = async () => {
       body: {
         title: favoriteTitle.value,
         queryText: prompt.value,
-        generatedSql: generatedResult.value.sql,
+        generatedSql: editableSql.value || generatedResult.value.sql,
         explanationTh: generatedResult.value.explanation
       }
     })

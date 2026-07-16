@@ -1,8 +1,24 @@
-export default defineNuxtRouteMiddleware(async (to) => {
-  // ระหว่าง client hydration ให้ข้าม — SSR จัดการ auth และ redirect ก่อนส่ง HTML ให้ browser แล้ว
-  // การรัน middleware ซ้ำบน client ทำให้เกิด redirect ผิดพลาดและ hydration mismatch
-  if (import.meta.client && useNuxtApp().isHydrating) {
-    return
+export default defineNuxtRouteMiddleware(async (to, from) => {
+  const nuxtApp = useNuxtApp()
+
+  const ssrAuthPassed = useState<boolean>('ssr-auth-passed', () => false)
+
+  if (import.meta.client) {
+    // ระหว่าง hydration ให้ข้ามเสมอ
+    if (nuxtApp.isHydrating) return
+
+    // from.matched.length === 0 = Vue Router START_LOCATION (initial post-SSR navigation)
+    // ข้ามครั้งแรกหลัง SSR เสมอ และ clear ssrAuthPassed เพื่อให้ navigation จริงถัดไปตรวจ auth จริง
+    if (from.matched.length === 0) {
+      ssrAuthPassed.value = false
+      return
+    }
+
+    // safety net: หาก Suspense trigger ซ้ำก่อนที่ user จะ navigate จริง
+    if (ssrAuthPassed.value) {
+      ssrAuthPassed.value = false
+      return
+    }
   }
 
   // useRequestFetch forwards cookies server-side and is never cached unlike useFetch
@@ -12,6 +28,12 @@ export default defineNuxtRouteMiddleware(async (to) => {
   if (!auth?.authenticated) {
     if (to.path !== '/login') return navigateTo('/login')
     return
+  }
+
+  // อัปเดต auth-data ทั้งบน server และ client เพื่อให้ page components เข้าถึงข้อมูล user ได้เสมอ
+  useState<any>('auth-data').value = auth
+  if (import.meta.server) {
+    ssrAuthPassed.value = true
   }
 
   const user = auth.user
