@@ -1515,6 +1515,9 @@ const applyAiFixInTab = () => {
   if (!sqlFixInTabSuggestion.value?.fixedSql) return
   editableSql.value = formatSql(sqlFixInTabSuggestion.value.fixedSql)
   sqlFixInTabSuggestion.value = null
+  if (generatedResult.value) {
+    generatedResult.value.dbError = null
+  }
 }
 
 // แปลง tool name เป็นข้อความสถานะภาษาไทย
@@ -3046,7 +3049,7 @@ const highlightSql = (sqlStr: string) => {
             </div>
             <div class="sql-panel-content p-3 flex-1 overflow-y-auto" :class="isSqlEditorExpanded ? 'flex flex-col overflow-hidden' : ''">
               <!-- SQL Error in editor panel -->
-              <div v-if="generatedResult.status === 'error'" class="mb-3 space-y-2">
+              <div v-if="generatedResult.status === 'error' && generatedResult.dbError" class="mb-3 space-y-2">
                 <!-- Error banner + action buttons -->
                 <div class="p-3 bg-rose-50 dark:bg-rose-900/10 border border-rose-200 dark:border-rose-900/30 rounded-lg">
                   <p class="text-[10px] font-black text-rose-600 dark:text-rose-400 uppercase tracking-widest mb-1">SQL Error</p>
@@ -3057,12 +3060,6 @@ const highlightSql = (sqlStr: string) => {
                       <Loader2 v-if="isFixingSqlInTab" class="w-3 h-3 animate-spin" />
                       <Sparkles v-else class="w-3 h-3" />
                       {{ isFixingSqlInTab ? (sqlFixStatus || 'AI กำลังวิเคราะห์...') : 'Fix ด้วย AI' }}
-                    </button>
-                    <button v-if="isSqlEditedFromOriginal || generatedResult?.dbError" @click="fetchData" :disabled="isFetching"
-                      class="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-[10px] font-black rounded-lg transition-all active:scale-95 uppercase tracking-widest">
-                      <Loader2 v-if="isFetching" class="w-3 h-3 animate-spin" />
-                      <Database v-else class="w-3 h-3" />
-                      {{ isFetching ? 'กำลังดึง...' : 'ดึงข้อมูลอีกครั้ง' }}
                     </button>
                   </div>
                 </div>
@@ -3121,6 +3118,15 @@ const highlightSql = (sqlStr: string) => {
                     </div>
                   </div>
                 </div>
+              </div>
+              <!-- ปุ่มดึงข้อมูลอีกครั้ง — แสดงเมื่อ SQL ถูกแก้จากต้นฉบับ หรือยังมี error อยู่ (รวมหลัง AI fix ก่อน fetch ใหม่) -->
+              <div v-if="isSqlEditedFromOriginal || generatedResult?.status === 'error'" class="mb-3">
+                <button @click="fetchData" :disabled="isFetching"
+                  class="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-[10px] font-black rounded-lg transition-all active:scale-95 uppercase tracking-widest">
+                  <Loader2 v-if="isFetching" class="w-3 h-3 animate-spin" />
+                  <Database v-else class="w-3 h-3" />
+                  {{ isFetching ? 'กำลังดึง...' : 'ดึงข้อมูลอีกครั้ง' }}
+                </button>
               </div>
               <div class="sql-editor-wrap rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 focus-within:ring-2 focus-within:ring-blue-500/40 focus-within:border-blue-400 transition-colors" :class="isSqlEditorExpanded ? 'sql-editor-wrap-expanded' : ''">
                 <button v-if="!isResultFullscreen" @click="isSqlEditorExpanded = !isSqlEditorExpanded"
