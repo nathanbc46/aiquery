@@ -112,6 +112,10 @@ export default defineEventHandler(async (event) => {
       let chatResult = await chat.sendMessage(finalPrompt)
       let iteration = 0
 
+      // เก็บผลการสำรวจ schema ระหว่าง agentic loop
+      const exploredTables: string[] = []
+      const tableSchemas: Record<string, any[]> = {}
+
       // Agentic loop — stream แต่ละ tool call
       while (iteration < MAX_ITERATIONS) {
         const candidate = chatResult.response.candidates?.[0]
@@ -128,7 +132,25 @@ export default defineEventHandler(async (event) => {
 
           await send({ type: 'step_start', tool: name, args: args ?? {}, elapsed: elapsed() })
 
-          const toolResult = await dispatchTool(name, args ?? {}, session.role ?? 'user')
+          let toolResult: unknown
+          try {
+            toolResult = await dispatchTool(name, args ?? {}, session.role ?? 'user')
+          } catch (toolErr: any) {
+            toolResult = { error: toolErr.message || 'Tool failed' }
+          }
+
+          // บันทึกผลการสำรวจ schema เพื่อส่งต่อให้ chat/fix
+          if (name === 'list_tables') {
+            const tables = Array.isArray(toolResult) ? toolResult : ((toolResult as any)?.tables ?? [])
+            for (const t of tables) {
+              if (typeof t === 'string' && !exploredTables.includes(t)) exploredTables.push(t)
+            }
+          } else if (name === 'describe_table') {
+            const tableName = (args as any)?.table_name
+            if (tableName && Array.isArray(toolResult)) {
+              tableSchemas[tableName] = toolResult as any[]
+            }
+          }
 
           await send({ type: 'step_done', tool: name, stepElapsed: Date.now() - stepStart, elapsed: elapsed() })
 
@@ -227,6 +249,21 @@ export default defineEventHandler(async (event) => {
         elapsed: elapsed()
       })
 
+      // Build schemaContext จากข้อมูลที่ explore ระหว่าง generation
+      const schemaContextParts: string[] = []
+      if (exploredTables.length > 0) {
+        schemaContextParts.push(`### ตารางที่ระบบสำรวจ\n${exploredTables.join(', ')}`)
+      }
+      for (const [tbl, cols] of Object.entries(tableSchemas)) {
+        const colLines = (cols as any[]).map((c: any) =>
+          `  - ${c.column}: ${c.type}${c.key === 'PRI' ? ' (PK)' : ''}${c.nullable === 'NO' ? ' NOT NULL' : ''}`
+        )
+        schemaContextParts.push(`### ${tbl}\n${colLines.join('\n')}`)
+      }
+      const schemaContext = schemaContextParts.length > 0
+        ? `## Schema ที่ระบบสำรวจระหว่างสร้าง SQL\n\n${schemaContextParts.join('\n\n')}`
+        : ''
+
       // Done
       await send({
         type: 'done',
@@ -234,6 +271,7 @@ export default defineEventHandler(async (event) => {
         explanation: jsonResult.explanation,
         maxResultsLimit: maxLimit,
         limitOverridden,
+        schemaContext,
         totalElapsed: elapsed()
       })
 

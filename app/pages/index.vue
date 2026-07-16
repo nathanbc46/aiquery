@@ -181,6 +181,9 @@ const sqlChatMessages = ref<{ role: 'user' | 'model'; text: string; updatedSql?:
 const sqlChatInput = ref('')
 const isSqlChatLoading = ref(false)
 const sqlChatInputRef = ref<HTMLTextAreaElement | null>(null)
+const sqlChatScrollRef = ref<HTMLDivElement | null>(null)
+const sqlChatStatus = ref('')   // แสดงสถานะ AI กำลังทำอะไร (tool calls)
+const sqlFixStatus = ref('')    // สถานะสำหรับ AI Fix
 
 watch(isSqlChatOpen, async (val) => {
   if (val) {
@@ -1423,6 +1426,7 @@ const handleStreamEvent = (ev: any) => {
         dbError: validateResult.value?.ok === false ? validateResult.value.error : null,
         maxResultsLimit: ev.maxResultsLimit,
         limitOverridden: ev.limitOverridden,
+        schemaContext: ev.schemaContext || '',
         mode: 'agentic'
       }
       editableSql.value = formatSql(ev.sql)
@@ -1453,16 +1457,57 @@ const fetchSqlFixForTab = async () => {
   if (!sqlText || !errorMsg || isFixingSqlInTab.value) return
   isFixingSqlInTab.value = true
   sqlFixInTabSuggestion.value = null
+  sqlFixStatus.value = 'กำลังวิเคราะห์โครงสร้าง DB...'
   try {
-    const res = await $fetch<any>('/api/ai-query/fix-sql', {
+    const response = await fetch('/api/ai-query/fix-sql', {
       method: 'POST',
-      body: { sql: sqlText, error: errorMsg }
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sql: sqlText,
+        error: errorMsg,
+        schemaContext: generatedResult.value?.schemaContext || ''
+      })
     })
-    if (res.success && res.suggestion) {
-      sqlFixInTabSuggestion.value = res.suggestion
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+
+    const reader = response.body!.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+
+    const processFixEvent = (ev: any) => {
+      if (ev.type === 'tool_start') {
+        sqlFixStatus.value = toolStatusText(ev.tool, ev.args)
+      } else if (ev.type === 'tool_done') {
+        sqlFixStatus.value = 'กำลังวิเคราะห์...'
+      } else if (ev.type === 'done' && ev.suggestion) {
+        sqlFixInTabSuggestion.value = ev.suggestion
+      } else if (ev.type === 'error') {
+        sqlFixInTabSuggestion.value = { cause: ev.message || 'เกิดข้อผิดพลาด', fix: 'กรุณาลองใหม่อีกครั้ง', fixedSql: null }
+      }
     }
-  } catch { /* silent */ }
-  finally { isFixingSqlInTab.value = false }
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const parts = buffer.split('\n\n')
+      buffer = parts.pop() ?? ''
+      for (const part of parts) {
+        const line = part.replace(/^data:\s*/, '').trim()
+        if (!line) continue
+        try { processFixEvent(JSON.parse(line)) } catch { /* skip */ }
+      }
+    }
+    if (buffer.trim()) {
+      const line = buffer.replace(/^data:\s*/, '').trim()
+      if (line) { try { processFixEvent(JSON.parse(line)) } catch { /* skip */ } }
+    }
+  } catch (err: any) {
+    sqlFixInTabSuggestion.value = { cause: err?.message || 'เกิดข้อผิดพลาด', fix: 'กรุณาลองใหม่อีกครั้ง', fixedSql: null }
+  } finally {
+    isFixingSqlInTab.value = false
+    sqlFixStatus.value = ''
+  }
 }
 
 // Apply AI fix ไปที่ editableSql
@@ -1470,6 +1515,23 @@ const applyAiFixInTab = () => {
   if (!sqlFixInTabSuggestion.value?.fixedSql) return
   editableSql.value = formatSql(sqlFixInTabSuggestion.value.fixedSql)
   sqlFixInTabSuggestion.value = null
+}
+
+// แปลง tool name เป็นข้อความสถานะภาษาไทย
+const toolStatusText = (tool: string, args: any): string => {
+  if (tool === 'list_tables') return `กำลังค้นหาตาราง${args?.module_hint ? ` "${args.module_hint}"` : ''}...`
+  if (tool === 'describe_table') return `กำลังดูโครงสร้างตาราง "${args?.table_name}"...`
+  if (tool === 'search_columns') return `กำลังค้นหาคอลัมน์ "${args?.keyword}"...`
+  if (tool === 'list_picklist_values') return `กำลังดึงค่า "${args?.field_name}"...`
+  return 'กำลังค้นหาข้อมูล...'
+}
+
+// เลื่อน chat scroll ลงล่างสุด
+const scrollSqlChatToBottom = async () => {
+  await nextTick()
+  if (sqlChatScrollRef.value) {
+    sqlChatScrollRef.value.scrollTop = sqlChatScrollRef.value.scrollHeight
+  }
 }
 
 // SQL Chat functions
@@ -1481,23 +1543,73 @@ const sendSqlChat = async () => {
   sqlChatMessages.value.push({ role: 'user', text: q })
   sqlChatInput.value = ''
   isSqlChatLoading.value = true
+  sqlChatStatus.value = 'กำลังวิเคราะห์...'
+  await scrollSqlChatToBottom()
 
   try {
     const history = sqlChatMessages.value.slice(0, -1).map(m => ({ role: m.role, text: m.text }))
-    const res = await $fetch<any>('/api/ai-query/chat-sql', {
+    const response = await fetch('/api/ai-query/chat-sql', {
       method: 'POST',
-      body: {
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
         sql: sqlText,
         error: generatedResult.value?.dbError || '',
         question: q,
-        messages: history
-      }
+        messages: history,
+        schemaContext: generatedResult.value?.schemaContext || ''
+      })
     })
-    sqlChatMessages.value.push({ role: 'model', text: res.reply, updatedSql: res.updatedSql })
-  } catch {
-    sqlChatMessages.value.push({ role: 'model', text: 'เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง' })
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+
+    const reader = response.body!.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let gotReply = false
+
+    const processChatEvent = async (ev: any) => {
+      if (ev.type === 'tool_start') {
+        sqlChatStatus.value = toolStatusText(ev.tool, ev.args)
+      } else if (ev.type === 'tool_done') {
+        sqlChatStatus.value = 'กำลังวิเคราะห์...'
+      } else if (ev.type === 'done') {
+        const replyText = ev.reply || '(ไม่มีคำตอบ กรุณาลองใหม่)'
+        sqlChatMessages.value.push({ role: 'model', text: replyText, updatedSql: ev.updatedSql })
+        gotReply = true
+        await scrollSqlChatToBottom()
+      } else if (ev.type === 'error') {
+        sqlChatMessages.value.push({ role: 'model', text: `❌ ${ev.message || 'เกิดข้อผิดพลาด กรุณาลองใหม่'}` })
+        gotReply = true
+      }
+    }
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const parts = buffer.split('\n\n')
+      buffer = parts.pop() ?? ''
+      for (const part of parts) {
+        const line = part.replace(/^data:\s*/, '').trim()
+        if (!line) continue
+        try { await processChatEvent(JSON.parse(line)) } catch { /* skip bad json */ }
+      }
+    }
+    // process ส่วนที่เหลือใน buffer (chunk สุดท้ายที่ไม่มี \n\n)
+    if (buffer.trim()) {
+      const line = buffer.replace(/^data:\s*/, '').trim()
+      if (line) {
+        try { await processChatEvent(JSON.parse(line)) } catch { /* skip */ }
+      }
+    }
+    // ถ้า stream จบโดยไม่มี done/error event เลย
+    if (!gotReply) {
+      sqlChatMessages.value.push({ role: 'model', text: 'ไม่ได้รับคำตอบจาก AI กรุณาลองใหม่อีกครั้ง' })
+    }
+  } catch (err: any) {
+    sqlChatMessages.value.push({ role: 'model', text: `❌ ${err?.message || 'เกิดข้อผิดพลาด กรุณาลองใหม่'}` })
   } finally {
     isSqlChatLoading.value = false
+    sqlChatStatus.value = ''
   }
 }
 
@@ -1884,18 +1996,56 @@ const submitDirectSql = async () => {
 const fetchSqlFix = async (sqlText: string, errorMsg: string) => {
   isFixingSql.value = true
   sqlFixSuggestion.value = null
+  sqlFixStatus.value = 'กำลังวิเคราะห์โครงสร้าง DB...'
   try {
-    const res = await $fetch<any>('/api/ai-query/fix-sql', {
+    const response = await fetch('/api/ai-query/fix-sql', {
       method: 'POST',
-      body: { sql: sqlText, error: errorMsg }
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sql: sqlText,
+        error: errorMsg,
+        schemaContext: generatedResult.value?.schemaContext || ''
+      })
     })
-    if (res.success && res.suggestion) {
-      sqlFixSuggestion.value = res.suggestion
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+
+    const reader = response.body!.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+
+    const processFixDirectEvent = (ev: any) => {
+      if (ev.type === 'tool_start') {
+        sqlFixStatus.value = toolStatusText(ev.tool, ev.args)
+      } else if (ev.type === 'tool_done') {
+        sqlFixStatus.value = 'กำลังวิเคราะห์...'
+      } else if (ev.type === 'done' && ev.suggestion) {
+        sqlFixSuggestion.value = ev.suggestion
+      } else if (ev.type === 'error') {
+        sqlFixSuggestion.value = { cause: ev.message || 'เกิดข้อผิดพลาด', fix: 'กรุณาลองใหม่', fixedSql: null }
+      }
     }
-  } catch {
-    // ถ้า AI ช่วยไม่ได้ก็ไม่แสดงอะไร
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const parts = buffer.split('\n\n')
+      buffer = parts.pop() ?? ''
+      for (const part of parts) {
+        const line = part.replace(/^data:\s*/, '').trim()
+        if (!line) continue
+        try { processFixDirectEvent(JSON.parse(line)) } catch { /* skip */ }
+      }
+    }
+    if (buffer.trim()) {
+      const line = buffer.replace(/^data:\s*/, '').trim()
+      if (line) { try { processFixDirectEvent(JSON.parse(line)) } catch { /* skip */ } }
+    }
+  } catch (err: any) {
+    sqlFixSuggestion.value = { cause: err?.message || 'เกิดข้อผิดพลาด', fix: 'กรุณาลองใหม่', fixedSql: null }
   } finally {
     isFixingSql.value = false
+    sqlFixStatus.value = ''
   }
 }
 
@@ -2887,9 +3037,9 @@ const highlightSql = (sqlStr: string) => {
                       class="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-white text-[10px] font-black rounded-lg transition-all active:scale-95 uppercase tracking-widest">
                       <Loader2 v-if="isFixingSqlInTab" class="w-3 h-3 animate-spin" />
                       <Sparkles v-else class="w-3 h-3" />
-                      {{ isFixingSqlInTab ? 'AI กำลังวิเคราะห์...' : 'Fix ด้วย AI' }}
+                      {{ isFixingSqlInTab ? (sqlFixStatus || 'AI กำลังวิเคราะห์...') : 'Fix ด้วย AI' }}
                     </button>
-                    <button v-if="isSqlEditedFromOriginal" @click="fetchData" :disabled="isFetching"
+                    <button v-if="isSqlEditedFromOriginal || generatedResult?.dbError" @click="fetchData" :disabled="isFetching"
                       class="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-[10px] font-black rounded-lg transition-all active:scale-95 uppercase tracking-widest">
                       <Loader2 v-if="isFetching" class="w-3 h-3 animate-spin" />
                       <Database v-else class="w-3 h-3" />
@@ -2979,7 +3129,7 @@ const highlightSql = (sqlStr: string) => {
               </button>
             </div>
             <!-- Messages -->
-            <div class="flex-1 overflow-y-auto p-3 space-y-2 bg-white dark:bg-slate-900 min-h-0">
+            <div ref="sqlChatScrollRef" class="flex-1 overflow-y-auto p-3 space-y-2 bg-white dark:bg-slate-900 min-h-0">
               <div v-if="sqlChatMessages.length === 0" class="text-center text-xs text-slate-400 py-8">
                 พิมพ์คำถามเกี่ยวกับ SQL นี้<br>เช่น "ทำไมได้ 0 รายการ?" หรือ "เพิ่ม filter วันที่ด้วย"
               </div>
@@ -3011,7 +3161,7 @@ const highlightSql = (sqlStr: string) => {
               <div v-if="isSqlChatLoading" class="flex justify-start">
                 <div class="px-3 py-2 bg-slate-100 dark:bg-slate-800 rounded-2xl rounded-tl-sm flex items-center gap-1.5">
                   <Loader2 class="w-3 h-3 text-violet-500 animate-spin" />
-                  <span class="text-xs text-slate-500">AI กำลังคิด...</span>
+                  <span class="text-xs text-slate-500">{{ sqlChatStatus || 'AI กำลังคิด...' }}</span>
                 </div>
               </div>
             </div>
