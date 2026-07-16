@@ -93,7 +93,7 @@ export default defineEventHandler(async (event) => {
           const isApproved = status === 'APPROVED';
           sendEmail({
             to: req.email,
-            subject: `${isApproved ? '✅ คำขอของคุณได้รับอนุมัติแล้ว' : '❌ คำขอของคุณไม่ได้รับการอนุมัติ'}`,
+            subject: `${isApproved ? '✅ คำขอของคุณได้รับอนุมัติแล้ว' : '❌ คำขอของคุณไม่ได้รับการอนุมัติ'} — "${(req.queryText ?? '').slice(0, 50)}${(req.queryText?.length ?? 0) > 50 ? '...' : ''}"`,
             html: `
               <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f4f7fa; padding: 30px 10px;">
                 <div style="max-width: 580px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; overflow: hidden; border: 1px solid #e1e8f0; box-shadow: 0 4px 6px rgba(0,0,0,0.02);">

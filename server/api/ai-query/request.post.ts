@@ -34,7 +34,7 @@ async function sendOwnerNotificationEmail(opts: {
 
   await sendEmail({
     to: ownerEmail,
-    subject: `📊 ${opts.createdByDisplayName} ได้เตรียมข้อมูลสำหรับคุณแล้ว`,
+    subject: `📊 ข้อมูลพร้อมดาวน์โหลด — "${(opts.queryText ?? '').slice(0, 50)}${(opts.queryText?.length ?? 0) > 50 ? '...' : ''}"`,
     html: `
       <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;background-color:#f4f7fa;padding:30px 10px;">
         <div style="max-width:580px;margin:0 auto;background-color:#fff;border-radius:12px;overflow:hidden;border:1px solid #e1e8f0;box-shadow:0 4px 6px rgba(0,0,0,0.02);">
@@ -159,7 +159,7 @@ export default defineEventHandler(async (event) => {
           if (recipientEmails.length > 0) {
             sendEmail({
               to: recipientEmails.join(','),
-              subject: `🔔 มีคำขออนุมัติดึงข้อมูลใหม่จากคุณ ${session.displayName}`,
+              subject: `🔔 มีคำขออนุมัติใหม่ — "${(queryText ?? '').slice(0, 50)}${(queryText?.length ?? 0) > 50 ? '...' : ''}"`,
               html: `
                 <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f4f7fa; padding: 30px 10px;">
                   <div style="max-width: 580px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; overflow: hidden; border: 1px solid #e1e8f0; box-shadow: 0 4px 6px rgba(0,0,0,0.02);">
