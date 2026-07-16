@@ -67,8 +67,13 @@ export default defineEventHandler(async (event) => {
       : `vtiger_export_${(requestId.split('-')[0] || 'FILE').toUpperCase()}`;
     const fileName = `${sanitized}.csv`;
 
+    // ASCII fallback สำหรับ filename= (non-ASCII ไม่ได้รับอนุญาตใน HTTP header)
+    // filename*= ใช้ RFC 5987 encoding รองรับ Unicode เต็มรูปแบบ
+    const asciiFileName = fileName.replace(/[^\x00-\x7F]/g, '_');
+    const encodedFileName = encodeURIComponent(fileName);
+
     setHeader(event, 'Content-Type', 'text/csv; charset=utf-8');
-    setHeader(event, 'Content-Disposition', `attachment; filename="${fileName}"`);
+    setHeader(event, 'Content-Disposition', `attachment; filename="${asciiFileName}"; filename*=UTF-8''${encodedFileName}`);
 
     return '﻿' + csv;
 
