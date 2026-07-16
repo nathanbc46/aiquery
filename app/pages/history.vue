@@ -874,19 +874,16 @@ onUnmounted(() => {
           <!-- 1. Top Meta Bar (Ultra Compact) -->
           <div class="flex items-center justify-between gap-4 mb-3 pb-3 border-b border-slate-100 dark:border-slate-800/50">
             <div class="flex items-center gap-2 overflow-hidden">
-              <div class="px-2 py-0.5 bg-slate-50 dark:bg-slate-950 rounded border border-slate-200 dark:border-slate-800 text-[9px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest shrink-0">
-                #{{ req.id.split('-')[0].toUpperCase() }}
+              <div class="flex items-center gap-1.5 text-[11px] font-bold text-slate-600 dark:text-slate-300 whitespace-nowrap shrink-0">
+                <Calendar class="w-3.5 h-3.5 text-slate-400 dark:text-slate-500" />
+                {{ req.time }}
               </div>
-              <div class="flex items-center gap-1.5 px-2 py-0.5 bg-blue-50/50 dark:bg-blue-900/10 text-blue-600 dark:text-blue-400 rounded text-[9px] font-black uppercase tracking-widest border border-blue-100 dark:border-blue-800/50 shrink-0">
-                <User class="w-3 h-3" />
+              <div class="flex items-center gap-1.5 px-2.5 py-1 bg-blue-100/60 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-lg text-[11px] font-black uppercase tracking-widest border border-blue-200/70 dark:border-blue-700/50 shrink-0">
+                <User class="w-3.5 h-3.5" />
                 {{ req.ownerName }}
               </div>
               <div v-if="req.ownerName !== req.user" class="flex items-center gap-1 px-2 py-0.5 bg-slate-100/80 dark:bg-white/5 text-slate-400 dark:text-slate-500 rounded text-[9px] font-medium border border-slate-200 dark:border-white/10 shrink-0">
                 ดึงข้อมูลโดย {{ req.user }}
-              </div>
-              <div class="hidden sm:flex items-center gap-1.5 text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest whitespace-nowrap">
-                <Calendar class="w-3 h-3" />
-                {{ req.time }}
               </div>
             </div>
             <div class="flex items-center gap-2">
@@ -911,7 +908,7 @@ onUnmounted(() => {
           <div class="flex flex-col lg:flex-row gap-4 items-start">
             <!-- Left: Query & Meta Details -->
             <div class="flex-1 min-w-0 space-y-3">
-              <h4 class="text-lg font-medium text-slate-700 dark:text-slate-300 leading-tight">"{{ req.query }}"</h4>
+              <h4 class="text-lg font-medium text-slate-700 dark:text-slate-300 leading-tight truncate" :title="req.query">"{{ req.query }}"</h4>
               
               <!-- Reason/Comment Buttons (Inline & Compact) -->
               <div class="flex flex-wrap gap-2">
@@ -942,6 +939,15 @@ onUnmounted(() => {
                   <ChevronUp v-if="openCommentIds.has(req.id)" class="w-3.5 h-3.5" />
                   <ChevronDown v-else class="w-3.5 h-3.5" />
                 </button>
+
+                <button
+                  v-if="user?.role === 'admin' || user?.role === 'manager'"
+                  @click="openSqlModal(req.sql, req.explanation)"
+                  class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-[11px] font-bold transition-all active:scale-95 bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 border-indigo-100 dark:border-indigo-800 hover:bg-indigo-50 dark:hover:bg-indigo-900/20"
+                >
+                  <Code class="w-3.5 h-3.5" />
+                  View SQL
+                </button>
               </div>
 
               <!-- Collapsible Content -->
@@ -970,11 +976,11 @@ onUnmounted(() => {
 
             <!-- Right: Action Bar (Compact) -->
             <div v-if="req.status === 'APPROVED'" class="w-full lg:w-60 shrink-0 space-y-3">
-              <div v-if="req.isExpired" class="space-y-2">
-                <div class="px-4 py-2 bg-slate-50 dark:bg-slate-800/30 text-slate-400 text-[11px] font-bold rounded-xl border border-dashed border-slate-200 dark:border-slate-700 flex items-center justify-center gap-2">
-                  <TimerOff class="w-3.5 h-3.5" /> ลิงก์หมดอายุแล้ว
+              <div v-if="req.isExpired" class="flex items-center gap-2">
+                <div class="flex-1 px-3 py-2 bg-slate-50 dark:bg-slate-800/30 text-slate-400 text-[11px] font-bold rounded-xl border border-dashed border-slate-200 dark:border-slate-700 flex items-center justify-center gap-1.5">
+                  <TimerOff class="w-3.5 h-3.5 shrink-0" /> ลิงก์หมดอายุแล้ว
                 </div>
-                <button @click="openRenewModal(req.id)" class="w-full px-4 py-2 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-600 dark:hover:bg-blue-600 text-blue-600 dark:text-blue-400 hover:text-white dark:hover:text-white text-[11px] font-black uppercase tracking-widest rounded-xl border border-blue-200 dark:border-blue-800 transition-all flex items-center justify-center gap-2 shadow-sm">
+                <button @click="openRenewModal(req.id)" class="shrink-0 px-3 py-2 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-600 dark:hover:bg-blue-600 text-blue-600 dark:text-blue-400 hover:text-white dark:hover:text-white text-[11px] font-black uppercase tracking-widest rounded-xl border border-blue-200 dark:border-blue-800 transition-all flex items-center gap-1.5 shadow-sm">
                   <RefreshCw class="w-3.5 h-3.5" /> ขอต่ออายุ
                 </button>
               </div>
@@ -1050,52 +1056,6 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <!-- 3. AI Insights Box (Integrated) -->
-          <div class="mt-4 bg-slate-50/50 dark:bg-slate-950/30 rounded-2xl p-4 border border-slate-100 dark:border-slate-800/50 space-y-3">
-            <div class="flex gap-3">
-              <div class="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center shrink-0">
-                <FileSpreadsheet class="w-4 h-4 text-blue-500" />
-              </div>
-              <div class="flex-1 min-w-0">
-                <div class="flex items-center justify-between mb-1.5">
-                  <p class="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest">AI Insight & Explanation</p>
-                  <button
-                    v-if="user?.role === 'admin' || user?.role === 'manager' || authData?.user?.role === 'admin' || authData?.user?.role === 'manager'"
-                    @click="openSqlModal(req.sql, req.explanation)"
-                    class="flex items-center gap-1.5 px-2 py-0.5 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-[9px] font-black uppercase tracking-widest rounded-md border border-slate-200 dark:border-slate-700 transition-all shadow-sm"
-                  >
-                    <Code class="w-3 h-3 text-indigo-500" /> View SQL
-                  </button>
-                </div>
-                <p class="text-slate-600 dark:text-slate-400 text-xs leading-relaxed line-clamp-2">{{ req.explanation }}</p>
-              </div>
-            </div>
-
-            <!-- AI Action Buttons Row -->
-            <div v-if="req.status === 'APPROVED'" class="pt-3 border-t border-slate-200/50 dark:border-slate-800/50 flex items-center justify-between gap-3">
-              <div class="flex items-center gap-2">
-                <!-- Data Context Badge -->
-                <div class="flex items-center gap-1.5 px-2 py-1 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 text-[9px] font-black uppercase tracking-widest rounded-md border border-blue-100/50 dark:border-blue-800/50 shrink-0">
-                  <Database class="w-3 h-3" />
-                  จากข้อมูลชุดนี้
-                </div>
-
-                <div v-if="(req.resultCount || 0) > 5000" class="flex items-center gap-1.5 text-amber-600 dark:text-amber-400">
-                  <AlertTriangle class="w-3.5 h-3.5" />
-                  <span class="text-[9px] font-bold uppercase tracking-tight">AI 5K LIMIT</span>
-                </div>
-              </div>
-
-              <div class="flex gap-2">
-                <button @click="openAnalyze(req.id)" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black border transition-all active:scale-95 text-violet-700 dark:text-violet-400 border-violet-200 dark:border-violet-800 bg-violet-50 dark:bg-violet-900/20 hover:bg-violet-100 dark:hover:bg-violet-800/40">
-                  <Sparkles class="w-3.5 h-3.5" /> วิเคราะห์ด้วย AI
-                </button>
-                <button @click="openChat(req.id)" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black border transition-all active:scale-95 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-800/40">
-                  <Bot class="w-3.5 h-3.5" /> แชตถาม AI
-                </button>
-              </div>
-            </div>
-          </div>
         </div>
       </div>
     </div>
