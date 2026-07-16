@@ -32,6 +32,9 @@ export default defineNuxtConfig({
       short_name: 'AI-Query',
       description: 'ระบบดึงข้อมูลอัจฉริยะด้วย AI สำหรับ Vtiger CRM',
       theme_color: '#2563eb',
+      background_color: '#f8fafc',
+      display: 'standalone',
+      start_url: '/',
       lang: 'th',
       icons: [
         {

@@ -107,30 +107,9 @@ const closeMobileMenu = () => {
 }
 
 // ─── PWA Install Prompt ──────────────────────────────────────
-const deferredInstallPrompt = ref<any>(null)
-const isPwaInstallable = ref(false)
-
-onMounted(() => {
-  window.addEventListener('beforeinstallprompt', (e: Event) => {
-    e.preventDefault()
-    deferredInstallPrompt.value = e
-    isPwaInstallable.value = true
-  })
-  window.addEventListener('appinstalled', () => {
-    isPwaInstallable.value = false
-    deferredInstallPrompt.value = null
-  })
-})
-
-const installPwa = async () => {
-  if (!deferredInstallPrompt.value) return
-  deferredInstallPrompt.value.prompt()
-  const { outcome } = await deferredInstallPrompt.value.userChoice
-  if (outcome === 'accepted') {
-    isPwaInstallable.value = false
-    deferredInstallPrompt.value = null
-  }
-}
+const { $pwa } = useNuxtApp()
+const isPwaInstallable = computed(() => $pwa?.showInstallPrompt ?? false)
+const installPwa = () => $pwa?.install()
 </script>
 
 <template>
