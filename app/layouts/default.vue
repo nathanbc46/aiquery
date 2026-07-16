@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { 
-  Home, 
+import {
+  Home,
   History,
   LayoutDashboard,
-  CheckSquare, 
-  Users, 
-  Menu, 
-  X, 
+  CheckSquare,
+  Users,
+  Menu,
+  X,
   Zap,
   ChevronRight,
   LogOut,
@@ -16,7 +16,8 @@ import {
   AlertTriangle,
   Mail,
   UserCircle,
-  Bot
+  Bot,
+  Download
 } from 'lucide-vue-next'
 
 const isMobileMenuOpen = ref(false)
@@ -104,6 +105,32 @@ const adminSettingsItems = computed(() => {
 const closeMobileMenu = () => {
   isMobileMenuOpen.value = false
 }
+
+// ─── PWA Install Prompt ──────────────────────────────────────
+const deferredInstallPrompt = ref<any>(null)
+const isPwaInstallable = ref(false)
+
+onMounted(() => {
+  window.addEventListener('beforeinstallprompt', (e: Event) => {
+    e.preventDefault()
+    deferredInstallPrompt.value = e
+    isPwaInstallable.value = true
+  })
+  window.addEventListener('appinstalled', () => {
+    isPwaInstallable.value = false
+    deferredInstallPrompt.value = null
+  })
+})
+
+const installPwa = async () => {
+  if (!deferredInstallPrompt.value) return
+  deferredInstallPrompt.value.prompt()
+  const { outcome } = await deferredInstallPrompt.value.userChoice
+  if (outcome === 'accepted') {
+    isPwaInstallable.value = false
+    deferredInstallPrompt.value = null
+  }
+}
 </script>
 
 <template>
@@ -187,6 +214,24 @@ const closeMobileMenu = () => {
           </div>
         </ClientOnly>
       </nav>
+
+      <!-- PWA Install Button (Desktop Sidebar) -->
+      <ClientOnly>
+        <div v-if="isPwaInstallable" class="px-4 pb-2">
+          <button
+            @click="installPwa"
+            class="w-full flex items-center gap-3 px-4 py-3 rounded-2xl bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/40 border border-blue-100 dark:border-blue-800/50 text-blue-600 dark:text-blue-400 transition-all group"
+          >
+            <div class="w-8 h-8 rounded-xl bg-blue-600 flex items-center justify-center text-white shadow-lg shadow-blue-500/20 group-hover:scale-110 transition-transform shrink-0">
+              <Download class="w-4 h-4" />
+            </div>
+            <div class="text-left min-w-0">
+              <p class="text-[11px] font-black uppercase tracking-widest leading-none">ติดตั้งแอป</p>
+              <p class="text-[9px] font-medium text-blue-400 dark:text-blue-500 mt-0.5">เพิ่มลง Desktop</p>
+            </div>
+          </button>
+        </div>
+      </ClientOnly>
 
       <div class="p-6 space-y-3">
         <div class="glass-card rounded-2xl p-2 border border-slate-200/50 dark:border-slate-800/50 bg-white/50 dark:bg-slate-900/50">
@@ -300,6 +345,21 @@ const closeMobileMenu = () => {
             </NuxtLink>
           </div></ClientOnly>
         </nav>
+
+        <ClientOnly>
+          <div v-if="isPwaInstallable" class="px-6 pb-2">
+            <button
+              @click="installPwa"
+              class="w-full flex items-center gap-3 px-4 py-3 rounded-2xl bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800/50 text-blue-600 dark:text-blue-400"
+            >
+              <Download class="w-5 h-5 shrink-0" />
+              <div class="text-left">
+                <p class="text-sm font-black">ติดตั้งแอป</p>
+                <p class="text-[10px] text-blue-400">เพิ่มลง Home Screen</p>
+              </div>
+            </button>
+          </div>
+        </ClientOnly>
 
         <div class="p-6 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
           <ThemeToggle />
