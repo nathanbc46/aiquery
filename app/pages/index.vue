@@ -2173,8 +2173,22 @@ const formatSql = (sqlStr: string) => {
 const escapeHtml = (str: string) =>
   str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 
+// Parse MySQL error message → extract the problematic token to highlight in red
+const extractErrorToken = (errorMsg: string): string | null => {
+  if (!errorMsg) return null
+  let m = errorMsg.match(/Unknown column '([^']+)'/i)
+  if (m) return m[1]
+  m = errorMsg.match(/Table '[^.]*\.([^']+)' doesn't exist/i)
+  if (m) return m[1]
+  m = errorMsg.match(/Table '([^']+)' doesn't exist/i)
+  if (m) return m[1].split('.').pop() ?? null
+  m = errorMsg.match(/near '([^']+)'/i)
+  if (m) return m[1].split(/\s+/)[0].trim() || null
+  return null
+}
+
 // Highlight only — no formatting (used for editor overlay where text must match textarea exactly)
-const highlightOnlySql = (sqlStr: string) => {
+const highlightOnlySql = (sqlStr: string, errorToken?: string | null) => {
   if (!sqlStr) return ''
   let r = escapeHtml(sqlStr)
 
@@ -2182,8 +2196,13 @@ const highlightOnlySql = (sqlStr: string) => {
   const strings: string[] = []
   r = r.replace(/'([^']*)'/g, (m) => { strings.push(m); return `\x01S${strings.length - 1}\x01` })
 
+  // Step 1b: mark error token before other highlighting so it survives untouched
+  if (errorToken) {
+    const escapedTok = escapeHtml(errorToken).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    r = r.replace(new RegExp(escapedTok, 'gi'), '\x02$&\x03')
+  }
+
   // Step 2: highlight keywords using a single combined regex (multi-word listed first → matched before sub-words)
-  // Single-pass means INNER JOIN is matched before JOIN — no double-match / nested token problem
   const kwList = [
     'IS NOT NULL', 'IS NULL', 'NOT IN', 'GROUP BY', 'ORDER BY',
     'LEFT JOIN', 'INNER JOIN', 'RIGHT JOIN', 'CROSS JOIN',
@@ -2202,17 +2221,20 @@ const highlightOnlySql = (sqlStr: string) => {
   // Step 4: restore string literals with styling
   r = r.replace(/\x01S(\d+)\x01/g, (_, i) => `<span class="sql-hl-str">${escapeHtml(strings[parseInt(i)])}</span>`)
 
+  // Step 5: restore error token with red styling
+  r = r.replace(/\x02([^\x03]*)\x03/g, '<span class="sql-hl-err">$1</span>')
+
   return r
 }
 
-const highlightOnlySqlWithDiff = (editedSql: string): string => {
+const highlightOnlySqlWithDiff = (editedSql: string, errorToken?: string | null): string => {
   if (!editedSql) return ''
   const originalFormatted = formatSql(generatedResult.value?.sql ?? '')
   const origLineSet = new Set(
     originalFormatted.split('\n').map(l => l.trim()).filter(Boolean)
   )
   return editedSql.split('\n').map(line => {
-    const highlighted = highlightOnlySql(line)
+    const highlighted = highlightOnlySql(line, errorToken)
     const isChanged = line.trim() !== '' && !origLineSet.has(line.trim())
     return isChanged
       ? `<span class="sql-hl-diff">${highlighted}</span>`
@@ -3104,7 +3126,7 @@ const highlightSql = (sqlStr: string) => {
                   <component :is="isSqlEditorExpanded ? Minimize2 : Maximize2" class="w-3 h-3" />
                 </button>
                 <pre ref="sqlHighlightRef" aria-hidden="true" class="sql-editor-pre dark:!text-slate-200"
-                     v-html="isSqlEditedFromOriginal ? highlightOnlySqlWithDiff(editableSql) : highlightOnlySql(editableSql)"></pre>
+                     v-html="isSqlEditedFromOriginal ? highlightOnlySqlWithDiff(editableSql, extractErrorToken(generatedResult?.dbError)) : highlightOnlySql(editableSql, extractErrorToken(generatedResult?.dbError))"></pre>
                 <textarea ref="sqlEditorRef" v-model="editableSql" @scroll="syncHighlightScroll"
                   spellcheck="false" autocomplete="off"
                   class="sql-editor-textarea focus:outline-none"
@@ -5132,6 +5154,21 @@ textarea::placeholder {
 :global(.dark .sql-hl-str) { color: #86efac; }             /* green-300 */
 :global(.sql-hl-num) { color: #d97706; }                   /* amber-600 */
 :global(.dark .sql-hl-num) { color: #fcd34d; }             /* amber-300 */
+
+/* Error token — ไฮไลน์คำที่ทำให้ SQL error (สีแดง + underline wavy) */
+:global(.sql-hl-err) {
+  color: #dc2626;
+  background-color: rgba(254, 226, 226, 0.7);
+  border-radius: 2px;
+  padding: 0 1px;
+  text-decoration: underline wavy #dc2626;
+  text-underline-offset: 2px;
+}
+:global(.dark .sql-hl-err) {
+  color: #fca5a5;
+  background-color: rgba(127, 29, 29, 0.35);
+  text-decoration-color: #fca5a5;
+}
 
 /* Diff highlighting — บรรทัดที่ถูกแก้ไข/เพิ่ม */
 :global(.sql-hl-diff) {
