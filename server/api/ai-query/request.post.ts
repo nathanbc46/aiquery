@@ -130,7 +130,8 @@ export default defineEventHandler(async (event) => {
         }
 
         // ส่งเมลล์แจ้ง owner ถ้า owner เป็นคนละคนกับผู้ login และไม่ได้เลือก skipEmail
-        const baseUrl = process.env.APP_URL || 'http://localhost:3000';
+        const requestUrl = getRequestURL(event)
+        const baseUrl = process.env.APP_URL || `${requestUrl.protocol}//${requestUrl.host}`
         if (!skipEmail && ownerVtigerId && ownerVtigerId !== session.vtigerId) {
           sendOwnerNotificationEmail({
             ownerVtigerId: Number(ownerVtigerId),
@@ -147,7 +148,8 @@ export default defineEventHandler(async (event) => {
       }
     } else {
       // 3B. แจ้งเตือน Manager/Admin ทางอีเมล สำหรับ User ทั่วไป (Background task)
-      const baseUrl = process.env.APP_URL || 'http://localhost:3000';
+      const requestUrl2 = getRequestURL(event)
+      const baseUrl = process.env.APP_URL || `${requestUrl2.protocol}//${requestUrl2.host}`
       
       db.select({ email: users.email, displayName: users.displayName })
         .from(users)

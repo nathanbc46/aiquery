@@ -106,11 +106,14 @@ export default defineEventHandler(async (event) => {
           isExpired,
           time: (() => {
             if (!req.createdAt) return '';
+            const tz = 'Asia/Bangkok'
             const d = new Date(req.createdAt);
             const now = new Date();
-            const isToday = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
-            const timeStr = d.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
-            return isToday ? `วันนี้ ${timeStr}` : d.toLocaleString('th-TH');
+            const nowBkk = new Date(now.toLocaleString('en-US', { timeZone: tz }))
+            const dBkk = new Date(d.toLocaleString('en-US', { timeZone: tz }))
+            const isToday = dBkk.getFullYear() === nowBkk.getFullYear() && dBkk.getMonth() === nowBkk.getMonth() && dBkk.getDate() === nowBkk.getDate()
+            const timeStr = d.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', timeZone: tz });
+            return isToday ? `วันนี้ ${timeStr}` : d.toLocaleString('th-TH', { timeZone: tz });
           })(),
           resultCount: req.resultCount || 0,
           downloadCount: req.downloadCount || 0,

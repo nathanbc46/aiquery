@@ -101,7 +101,8 @@ export default defineEventHandler(async (event) => {
       const ownerEmail = ownerRecord?.email;
       if (ownerEmail) {
         const ownerName = ownerRecord?.displayName || `User #${ownerVtigerId}`;
-        const baseUrl = process.env.APP_URL || 'http://localhost:3000';
+        const reqUrl = getRequestURL(event)
+        const baseUrl = process.env.APP_URL || `${reqUrl.protocol}//${reqUrl.host}`
         const creatorName = session.displayName as string || 'ผู้ดูแลระบบ';
         sendEmail({
           to: ownerEmail,

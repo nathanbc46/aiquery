@@ -75,8 +75,9 @@ export default defineEventHandler(async (event) => {
       .where(eq(aiQueryRequests.id, requestId));
 
     // 3. แจ้งเตือนผู้ขอทางอีเมล (Background task)
-    const baseUrl = process.env.APP_URL || 'http://localhost:3000';
-    
+    const requestUrl = getRequestURL(event)
+    const baseUrl = process.env.APP_URL || `${requestUrl.protocol}//${requestUrl.host}`
+
     db.select({
       email: users.email,
       displayName: users.displayName,
