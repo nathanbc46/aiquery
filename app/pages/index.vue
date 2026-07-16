@@ -2727,39 +2727,36 @@ const highlightSql = (sqlStr: string) => {
             </div>
 
             <!-- AI Fix Suggestion -->
-            <div v-if="sqlFixSuggestion && !isFixingSql" class="p-5 bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800/40 rounded-2xl space-y-4">
-              <div class="flex items-center gap-2">
-                <div class="p-1.5 bg-amber-100 dark:bg-amber-900/40 rounded-lg">
-                  <Sparkles class="w-4 h-4 text-amber-600 dark:text-amber-400" />
+            <div v-if="sqlFixSuggestion && !isFixingSql"
+              class="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 overflow-hidden shadow-sm">
+              <!-- Header -->
+              <div class="flex items-center gap-2 px-4 py-2.5 bg-amber-500 dark:bg-amber-600">
+                <Sparkles class="w-4 h-4 text-white shrink-0" />
+                <p class="text-xs font-black text-white uppercase tracking-widest">AI แนะนำวิธีแก้ไข</p>
+              </div>
+              <div class="p-4 space-y-3">
+                <!-- Cause -->
+                <div class="rounded-xl bg-rose-50 dark:bg-rose-900/15 border-l-4 border-rose-400 dark:border-rose-500 px-4 py-2.5">
+                  <p class="text-[10px] font-black text-rose-500 dark:text-rose-400 uppercase tracking-widest mb-1">สาเหตุ</p>
+                  <p class="text-sm text-rose-900 dark:text-rose-200 leading-relaxed">{{ sqlFixSuggestion.cause }}</p>
                 </div>
-                <p class="text-xs font-black text-amber-700 dark:text-amber-400 uppercase tracking-widest">AI แนะนำวิธีแก้ไข</p>
-              </div>
-
-              <!-- Cause -->
-              <div class="space-y-1">
-                <p class="text-[10px] font-black text-amber-600 dark:text-amber-500 uppercase tracking-widest">สาเหตุ</p>
-                <p class="text-sm text-amber-900 dark:text-amber-200 leading-relaxed">{{ sqlFixSuggestion.cause }}</p>
-              </div>
-
-              <!-- Fix -->
-              <div class="space-y-1">
-                <p class="text-[10px] font-black text-amber-600 dark:text-amber-500 uppercase tracking-widest">วิธีแก้ไข</p>
-                <p class="text-sm text-amber-900 dark:text-amber-200 leading-relaxed">{{ sqlFixSuggestion.fix }}</p>
-              </div>
-
-              <!-- Fixed SQL -->
-              <div v-if="sqlFixSuggestion.fixedSql" class="space-y-2">
-                <p class="text-[10px] font-black text-amber-600 dark:text-amber-500 uppercase tracking-widest">SQL ที่แก้ไขแล้ว</p>
-                <div class="relative bg-slate-950 rounded-xl p-4 font-mono text-xs text-emerald-400 overflow-x-auto max-h-48 overflow-y-auto">
-                  <pre class="whitespace-pre-wrap leading-relaxed">{{ sqlFixSuggestion.fixedSql }}</pre>
+                <!-- Fix -->
+                <div class="rounded-xl bg-emerald-50 dark:bg-emerald-900/15 border-l-4 border-emerald-400 dark:border-emerald-500 px-4 py-2.5">
+                  <p class="text-[10px] font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-widest mb-1">วิธีแก้ไข</p>
+                  <p class="text-sm text-emerald-900 dark:text-emerald-200 leading-relaxed">{{ sqlFixSuggestion.fix }}</p>
                 </div>
-                <button
-                  @click="applyFixedSql"
-                  class="flex items-center gap-2 px-5 py-2.5 bg-amber-500 hover:bg-amber-400 text-white text-xs font-black rounded-xl transition-all active:scale-95 uppercase tracking-widest shadow-md shadow-amber-500/20"
-                >
-                  <CheckCircle2 class="w-3.5 h-3.5" />
-                  ใช้ SQL นี้
-                </button>
+                <!-- Fixed SQL -->
+                <div v-if="sqlFixSuggestion.fixedSql" class="space-y-2">
+                  <p class="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest px-1">SQL ที่แก้ไขแล้ว</p>
+                  <div class="relative bg-slate-950 rounded-xl p-4 font-mono text-xs text-emerald-400 overflow-x-auto max-h-48 overflow-y-auto">
+                    <pre class="whitespace-pre-wrap leading-relaxed">{{ sqlFixSuggestion.fixedSql }}</pre>
+                  </div>
+                  <button @click="applyFixedSql"
+                    class="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black rounded-xl transition-all active:scale-95 uppercase tracking-widest shadow-md shadow-emerald-500/20">
+                    <CheckCircle2 class="w-3.5 h-3.5" />
+                    ใช้ SQL นี้
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -3077,44 +3074,50 @@ const highlightSql = (sqlStr: string) => {
                 </div>
                 <!-- AI Fix Suggestion -->
                 <div v-if="sqlFixInTabSuggestion && !isFixingSqlInTab"
-                  class="p-4 bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800/40 rounded-lg space-y-3">
-                  <div class="flex items-center gap-2">
-                    <Sparkles class="w-3.5 h-3.5 text-amber-500 shrink-0" />
-                    <p class="text-[10px] font-black text-amber-700 dark:text-amber-400 uppercase tracking-widest">AI แนะนำวิธีแก้ไข</p>
+                  class="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 overflow-hidden shadow-sm">
+                  <!-- Header -->
+                  <div class="flex items-center gap-2 px-3 py-2 bg-amber-500 dark:bg-amber-600">
+                    <Sparkles class="w-3.5 h-3.5 text-white shrink-0" />
+                    <p class="text-[10px] font-black text-white uppercase tracking-widest">AI แนะนำวิธีแก้ไข</p>
                   </div>
-                  <div>
-                    <p class="text-[9px] font-black text-amber-600 dark:text-amber-500 uppercase tracking-widest mb-0.5">สาเหตุ</p>
-                    <p class="text-xs text-amber-900 dark:text-amber-200 leading-relaxed">{{ sqlFixInTabSuggestion.cause }}</p>
-                  </div>
-                  <div>
-                    <p class="text-[9px] font-black text-amber-600 dark:text-amber-500 uppercase tracking-widest mb-0.5">วิธีแก้ไข</p>
-                    <p class="text-xs text-amber-900 dark:text-amber-200 leading-relaxed">{{ sqlFixInTabSuggestion.fix }}</p>
-                  </div>
-                  <div v-if="sqlFixInTabSuggestion.fixedSql" class="space-y-2">
-                    <p class="text-[9px] font-black text-amber-600 dark:text-amber-500 uppercase tracking-widest">SQL ที่แก้ไขแล้ว</p>
-                    <div class="relative">
-                      <div class="bg-white dark:bg-slate-950 rounded-lg p-3 font-mono text-xs overflow-auto border border-slate-200 dark:border-slate-800 resize-y"
-                           :style="isFixSqlExpanded ? 'min-height:6rem; height:auto;' : 'min-height:6rem; height:10rem;'">
-                        <pre class="whitespace-pre-wrap leading-relaxed" v-html="highlightSqlWithDiff(sqlFixInTabSuggestion.fixedSql ?? '')"></pre>
-                      </div>
-                      <button @click.stop="isFixSqlExpanded = !isFixSqlExpanded"
-                        class="absolute top-1 right-1 p-0.5 rounded bg-white/90 dark:bg-slate-900/90 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 border border-slate-200 dark:border-slate-700 hover:bg-white dark:hover:bg-slate-800 transition-all"
-                        :title="isFixSqlExpanded ? 'ย่อ' : 'ขยาย'">
-                        <Maximize2 v-if="!isFixSqlExpanded" class="w-3 h-3" />
-                        <Minimize2 v-else class="w-3 h-3" />
-                      </button>
+                  <div class="p-3 space-y-2">
+                    <!-- สาเหตุ -->
+                    <div class="rounded-lg bg-rose-50 dark:bg-rose-900/15 border-l-4 border-rose-400 dark:border-rose-500 px-3 py-2">
+                      <p class="text-[9px] font-black text-rose-500 dark:text-rose-400 uppercase tracking-widest mb-1">สาเหตุ</p>
+                      <p class="text-xs text-rose-900 dark:text-rose-200 leading-relaxed">{{ sqlFixInTabSuggestion.cause }}</p>
                     </div>
-                    <div class="flex items-center gap-2">
-                      <button @click="applyAiFixInTab"
-                        class="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-black rounded-lg transition-all active:scale-95 uppercase tracking-widest">
-                        <CheckCircle2 class="w-3.5 h-3.5" />
-                        Confirm — ใช้ SQL นี้
-                      </button>
-                      <button @click="sqlFixInTabSuggestion = null; isFixSqlExpanded = false"
-                        class="flex items-center gap-1.5 px-4 py-2 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 text-[10px] font-black rounded-lg border border-slate-200 dark:border-slate-700 transition-all active:scale-95 uppercase tracking-widest">
-                        <X class="w-3.5 h-3.5" />
-                        ยกเลิก
-                      </button>
+                    <!-- วิธีแก้ไข -->
+                    <div class="rounded-lg bg-emerald-50 dark:bg-emerald-900/15 border-l-4 border-emerald-400 dark:border-emerald-500 px-3 py-2">
+                      <p class="text-[9px] font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-widest mb-1">วิธีแก้ไข</p>
+                      <p class="text-xs text-emerald-900 dark:text-emerald-200 leading-relaxed">{{ sqlFixInTabSuggestion.fix }}</p>
+                    </div>
+                    <!-- SQL ที่แก้ไขแล้ว -->
+                    <div v-if="sqlFixInTabSuggestion.fixedSql" class="space-y-2">
+                      <p class="text-[9px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest px-1">SQL ที่แก้ไขแล้ว</p>
+                      <div class="relative">
+                        <div class="bg-slate-50 dark:bg-slate-950 rounded-lg p-3 font-mono text-xs overflow-auto border border-slate-200 dark:border-slate-800 resize-y"
+                             :style="isFixSqlExpanded ? 'min-height:6rem; height:auto;' : 'min-height:6rem; height:10rem;'">
+                          <pre class="whitespace-pre-wrap leading-relaxed" v-html="highlightSqlWithDiff(sqlFixInTabSuggestion.fixedSql ?? '')"></pre>
+                        </div>
+                        <button @click.stop="isFixSqlExpanded = !isFixSqlExpanded"
+                          class="absolute top-1 right-1 p-0.5 rounded bg-white/90 dark:bg-slate-900/90 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 border border-slate-200 dark:border-slate-700 hover:bg-white dark:hover:bg-slate-800 transition-all"
+                          :title="isFixSqlExpanded ? 'ย่อ' : 'ขยาย'">
+                          <Maximize2 v-if="!isFixSqlExpanded" class="w-3 h-3" />
+                          <Minimize2 v-else class="w-3 h-3" />
+                        </button>
+                      </div>
+                      <div class="flex items-center gap-2">
+                        <button @click="applyAiFixInTab"
+                          class="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-black rounded-lg transition-all active:scale-95 uppercase tracking-widest">
+                          <CheckCircle2 class="w-3.5 h-3.5" />
+                          Confirm — ใช้ SQL นี้
+                        </button>
+                        <button @click="sqlFixInTabSuggestion = null; isFixSqlExpanded = false"
+                          class="flex items-center gap-1.5 px-4 py-2 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 text-[10px] font-black rounded-lg border border-slate-200 dark:border-slate-700 transition-all active:scale-95 uppercase tracking-widest">
+                          <X class="w-3.5 h-3.5" />
+                          ยกเลิก
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -5170,14 +5173,14 @@ textarea::placeholder {
   text-decoration-color: #fca5a5;
 }
 
-/* Diff highlighting — บรรทัดที่ถูกแก้ไข/เพิ่ม */
+/* Diff highlighting — บรรทัดที่ถูกแก้ไข/เพิ่ม (ใช้สีฟ้าเพื่อแยกจาก AI Fix panel สีเหลือง) */
 :global(.sql-hl-diff) {
   display: inline-block;
   min-width: 100%;
-  background: rgba(234, 179, 8, 0.13);
+  background: rgba(59, 130, 246, 0.10);
 }
 :global(.dark .sql-hl-diff) {
-  background: rgba(234, 179, 8, 0.09);
+  background: rgba(59, 130, 246, 0.12);
 }
 
 /* Expand SQL Editor within its panel column */
