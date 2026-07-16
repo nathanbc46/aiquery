@@ -134,6 +134,16 @@ const installPwa = () => $pwa?.install()
             <div>
               <h1 class="text-xl font-black tracking-tighter text-slate-900 dark:text-white uppercase leading-none">AI-Query</h1>
             </div>
+            <ClientOnly>
+              <button
+                v-if="isPwaInstallable"
+                @click="installPwa"
+                title="ติดตั้งแอป"
+                class="ml-1 w-7 h-7 rounded-lg flex items-center justify-center text-blue-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-all"
+              >
+                <Download class="w-4 h-4" />
+              </button>
+            </ClientOnly>
           </div>
       </div>
 
@@ -194,25 +204,7 @@ const installPwa = () => $pwa?.install()
         </ClientOnly>
       </nav>
 
-      <!-- PWA Install Button (Desktop Sidebar) -->
-      <ClientOnly>
-        <div v-if="isPwaInstallable" class="px-4 pb-2">
-          <button
-            @click="installPwa"
-            class="w-full flex items-center gap-3 px-4 py-3 rounded-2xl bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/40 border border-blue-100 dark:border-blue-800/50 text-blue-600 dark:text-blue-400 transition-all group"
-          >
-            <div class="w-8 h-8 rounded-xl bg-blue-600 flex items-center justify-center text-white shadow-lg shadow-blue-500/20 group-hover:scale-110 transition-transform shrink-0">
-              <Download class="w-4 h-4" />
-            </div>
-            <div class="text-left min-w-0">
-              <p class="text-[11px] font-black uppercase tracking-widest leading-none">ติดตั้งแอป</p>
-              <p class="text-[9px] font-medium text-blue-400 dark:text-blue-500 mt-0.5">เพิ่มลง Desktop</p>
-            </div>
-          </button>
-        </div>
-      </ClientOnly>
-
-      <div class="p-6 space-y-3">
+<div class="p-6 space-y-3">
         <div class="glass-card rounded-2xl p-2 border border-slate-200/50 dark:border-slate-800/50 bg-white/50 dark:bg-slate-900/50">
           <div class="flex items-center justify-between p-3">
             <div class="flex items-center gap-3">
@@ -248,12 +240,24 @@ const installPwa = () => $pwa?.install()
 
     <!-- Mobile Header -->
     <header class="lg:hidden fixed top-0 left-0 right-0 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 h-16 px-6 flex items-center justify-between z-40">
-      <NuxtLink to="/" class="flex items-center gap-2">
-        <div class="w-8 h-8 rounded-xl bg-blue-600 flex items-center justify-center text-white">
-          <Bot class="w-5 h-5" />
-        </div>
-        <span class="font-black tracking-tighter text-slate-900 dark:text-white uppercase">AI-Query</span>
-      </NuxtLink>
+      <div class="flex items-center gap-2">
+        <NuxtLink to="/" class="flex items-center gap-2">
+          <div class="w-8 h-8 rounded-xl bg-blue-600 flex items-center justify-center text-white">
+            <Bot class="w-5 h-5" />
+          </div>
+          <span class="font-black tracking-tighter text-slate-900 dark:text-white uppercase">AI-Query</span>
+        </NuxtLink>
+        <ClientOnly>
+          <button
+            v-if="isPwaInstallable"
+            @click="installPwa"
+            title="ติดตั้งแอป"
+            class="w-7 h-7 rounded-lg flex items-center justify-center text-blue-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-all"
+          >
+            <Download class="w-4 h-4" />
+          </button>
+        </ClientOnly>
+      </div>
       
       <button @click="isMobileMenuOpen = true" class="p-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
         <Menu class="w-6 h-6" />
@@ -324,21 +328,6 @@ const installPwa = () => $pwa?.install()
             </NuxtLink>
           </div></ClientOnly>
         </nav>
-
-        <ClientOnly>
-          <div v-if="isPwaInstallable" class="px-6 pb-2">
-            <button
-              @click="installPwa"
-              class="w-full flex items-center gap-3 px-4 py-3 rounded-2xl bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800/50 text-blue-600 dark:text-blue-400"
-            >
-              <Download class="w-5 h-5 shrink-0" />
-              <div class="text-left">
-                <p class="text-sm font-black">ติดตั้งแอป</p>
-                <p class="text-[10px] text-blue-400">เพิ่มลง Home Screen</p>
-              </div>
-            </button>
-          </div>
-        </ClientOnly>
 
         <div class="p-6 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
           <ThemeToggle />
