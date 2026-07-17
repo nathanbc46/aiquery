@@ -15,7 +15,7 @@ export const VALID_ROLES = "'Organisation','(Mi) Manager Team A (No Pipe)','Subs
 export const VALID_SALES_STAGES = "'S : Suspect','C : Candidate Prospect','B : Promoter Prospect','A : Power Promoter','A Plus : Power Promoter Plus','Closed Won','Closed Lost','Closed Opp'";
 export const VALID_ACCOUNT_TYPES = "'Analyst','Blacklist','Competitor','Customer','Integrator','Investor','Other','Partner','Press','Prospect','Reseller'";
 
-export const DEFAULT_ANALYZE_MODEL = 'gemini-3.1-flash-lite';
+export const DEFAULT_ANALYZE_MODEL = 'gemini-2.5-flash';
 export const DEFAULT_ANALYZE_INSTRUCTION = `คุณคือ AI นักวิเคราะห์ข้อมูล CRM ที่เชี่ยวชาญ
 ตอบเป็นภาษาไทยเสมอ ใช้ภาษาที่อ่านง่าย เข้าใจได้โดยไม่ต้องมีความรู้ด้าน IT
 สรุปข้อมูลให้เป็นประโยชน์ต่อธุรกิจ ระบุ Insight ที่น่าสนใจ และข้อสังเกตที่สำคัญ
