@@ -4,23 +4,20 @@ import crypto from 'crypto';
 
 export default defineEventHandler(async (event) => {
   const body = await readBody(event);
-  const { username, password, displayName, role } = body;
+  const { username, displayName, role, vtigerId } = body;
 
-  if (!username || !password || !displayName) {
+  if (!username || !displayName) {
     throw createError({ statusCode: 400, statusMessage: 'Missing required fields' });
   }
 
   try {
     const db = await useDb();
-    
-    // Simple mock password hashing (use bcrypt in production)
-    const passwordHash = crypto.createHash('sha256').update(password).digest('hex');
     const newId = crypto.randomUUID();
 
     await db.insert(users).values({
       id: newId,
+      vtigerId: vtigerId ?? 0,
       username,
-      passwordHash,
       displayName,
       role: role || 'user',
       isActive: true,

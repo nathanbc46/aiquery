@@ -1703,13 +1703,13 @@ const escapeHtml = (str: string) =>
 const extractErrorToken = (errorMsg: string): string | null => {
   if (!errorMsg) return null
   let m = errorMsg.match(/Unknown column '([^']+)'/i)
-  if (m) return m[1]
+  if (m) return m[1] ?? null
   m = errorMsg.match(/Table '[^.]*\.([^']+)' doesn't exist/i)
-  if (m) return m[1]
+  if (m) return m[1] ?? null
   m = errorMsg.match(/Table '([^']+)' doesn't exist/i)
-  if (m) return m[1].split('.').pop() ?? null
+  if (m) return m[1]?.split('.').pop() ?? null
   m = errorMsg.match(/near '([^']+)'/i)
-  if (m) return m[1].split(/\s+/)[0].trim() || null
+  if (m) return m[1]?.split(/\s+/)[0]?.trim() || null
   return null
 }
 
@@ -1745,7 +1745,7 @@ const highlightOnlySql = (sqlStr: string, errorToken?: string | null) => {
   r = r.replace(/(?<![a-zA-Z_])\b(\d+)\b/g, '<span class="sql-hl-num">$1</span>')
 
   // Step 4: restore string literals with styling
-  r = r.replace(/\x01S(\d+)\x01/g, (_, i) => `<span class="sql-hl-str">${escapeHtml(strings[parseInt(i)])}</span>`)
+  r = r.replace(/\x01S(\d+)\x01/g, (_, i) => `<span class="sql-hl-str">${escapeHtml(strings[parseInt(i as string)] ?? '')}</span>`)
 
   // Step 5: restore error token with red styling
   r = r.replace(/\x02([^\x03]*)\x03/g, '<span class="sql-hl-err">$1</span>')

@@ -11,7 +11,7 @@ async function explore() {
     
     const modules = ['industry', 'sales_stage', 'productcategory', 'rating', 'leadstatus'];
     for (const mod of modules) {
-        const matches = tableNames.filter(n => n.includes(mod));
+        const matches = tableNames.filter((n: string) => n.includes(mod));
         console.log(`Tables matching ${mod}:`, matches);
         for (const table of matches) {
             try {

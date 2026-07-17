@@ -96,7 +96,9 @@ export default defineEventHandler(async (event) => {
       // Execute tool calls และรวม responses
       const toolResponses: any[] = []
       for (const part of fnCalls) {
-        const { name, args } = part.functionCall
+        const fnCall = (part as any).functionCall
+        if (!fnCall) continue
+        const { name, args } = fnCall
         const toolResult = await dispatchTool(name, args ?? {}, session.role ?? 'user')
 
         if (isDebugMode) {
@@ -120,7 +122,7 @@ export default defineEventHandler(async (event) => {
     // ถ้าเกิน MAX_ITERATIONS → fallback เป็น hybrid static mode
     if (iteration >= MAX_ITERATIONS) {
       console.warn('[Agentic] MAX_ITERATIONS reached, falling back to hybrid static mode')
-      return fallbackToStaticMode(prompt, contextData, maxLimit, session, db, isDebugMode)
+      return fallbackToStaticMode(prompt, contextData, maxLimit, session, db, isDebugMode, MAX_ITERATIONS)
     }
 
     // Parse JSON response จาก AI
@@ -247,7 +249,8 @@ async function fallbackToStaticMode(
   maxLimit: number,
   session: any,
   db: any,
-  isDebugMode: boolean
+  isDebugMode: boolean,
+  maxIterations: number = 8
 ) {
   const apiKey = process.env.GEMINI_API_KEY!
 
@@ -298,7 +301,7 @@ async function fallbackToStaticMode(
     limitOverridden: false,
     reasoningSteps: ['(fallback: static hybrid mode — agentic loop exceeded max iterations)'],
     mode: 'static-fallback',
-    iterationsUsed: MAX_ITERATIONS,
+    iterationsUsed: maxIterations,
     modelUsed: 'gemini-2.0-flash'
   }
 }

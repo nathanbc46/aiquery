@@ -6,6 +6,7 @@
 
 import { useDb } from './db'
 import { sql } from 'drizzle-orm'
+import { SchemaType, type FunctionDeclaration } from '@google/generative-ai'
 import {
   VALID_INDUSTRIES, VALID_PROVINCES, VALID_PRODUCT_CATEGORIES,
   VALID_ROLES, VALID_SALES_STAGES, VALID_ACCOUNT_TYPES
@@ -218,15 +219,15 @@ export async function sampleData(
 
 // ─── Gemini Function Declarations ─────────────────────────────────────────────
 
-export const TOOL_DECLARATIONS = [
+export const TOOL_DECLARATIONS: FunctionDeclaration[] = [
   {
     name: 'list_tables',
     description: 'List available database tables. Optionally filter by module hint. ALWAYS call this first before writing SQL to know which tables exist.',
     parameters: {
-      type: 'object',
+      type: SchemaType.OBJECT,
       properties: {
         module_hint: {
-          type: 'string',
+          type: SchemaType.STRING,
           description: 'Optional keyword to filter tables by module (e.g. "salesorder", "lead", "asset", "ยอดขาย", "ลีด")'
         }
       }
@@ -236,10 +237,10 @@ export const TOOL_DECLARATIONS = [
     name: 'describe_table',
     description: 'Get all column definitions (name, type, nullable, key, comment) for a specific table. Call this before writing JOIN conditions to verify exact column names.',
     parameters: {
-      type: 'object',
+      type: SchemaType.OBJECT,
       properties: {
         table_name: {
-          type: 'string',
+          type: SchemaType.STRING,
           description: 'Exact table name (e.g. "vtiger_salesorder", "vtiger_account", "vtiger_crmentity")'
         }
       },
@@ -250,10 +251,10 @@ export const TOOL_DECLARATIONS = [
     name: 'search_columns',
     description: 'Search for columns matching a keyword across all vtiger/app tables. Use when unsure which table contains a specific field.',
     parameters: {
-      type: 'object',
+      type: SchemaType.OBJECT,
       properties: {
         keyword: {
-          type: 'string',
+          type: SchemaType.STRING,
           description: 'Column name keyword to search for (e.g. "accountname", "amount", "status", "salesorderid")'
         }
       },
@@ -264,10 +265,10 @@ export const TOOL_DECLARATIONS = [
     name: 'list_picklist_values',
     description: 'Get valid enum/picklist values for a specific field type. Use exact values from this list in WHERE clauses — never guess picklist values.',
     parameters: {
-      type: 'object',
+      type: SchemaType.OBJECT,
       properties: {
         field_name: {
-          type: 'string',
+          type: SchemaType.STRING,
           description: 'Field name or category (e.g. "industry", "province", "sales_stage", "account_type", "role", "product_category")'
         }
       },
@@ -278,14 +279,14 @@ export const TOOL_DECLARATIONS = [
     name: 'sample_data',
     description: 'Get a few sample rows from a table to understand the actual data format and values. Use to verify field formats before writing WHERE conditions.',
     parameters: {
-      type: 'object',
+      type: SchemaType.OBJECT,
       properties: {
         table_name: {
-          type: 'string',
+          type: SchemaType.STRING,
           description: 'Table name to sample (e.g. "vtiger_account", "vtiger_salesorder")'
         },
         limit: {
-          type: 'number',
+          type: SchemaType.NUMBER,
           description: 'Number of rows to return (1-5, default 3)'
         }
       },

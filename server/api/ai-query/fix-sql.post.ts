@@ -16,8 +16,8 @@ function extractTableNames(sqlText: string): string[] {
   const regex = /(?:FROM|JOIN)\s+([`"]?[a-zA-Z_][a-zA-Z0-9_]*[`"]?)/gi
   let match
   while ((match = regex.exec(sqlText)) !== null) {
-    const tbl = match[1].replace(/[`"]/g, '')
-    if (!tables.includes(tbl)) tables.push(tbl)
+    const tbl = (match[1] ?? '').replace(/[`"]/g, '')
+    if (tbl && !tables.includes(tbl)) tables.push(tbl)
   }
   return tables
 }

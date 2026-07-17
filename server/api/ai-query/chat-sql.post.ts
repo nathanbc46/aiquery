@@ -17,8 +17,8 @@ function extractTableNames(sqlText: string): string[] {
   const regex = /(?:FROM|JOIN)\s+([`"]?[a-zA-Z_][a-zA-Z0-9_]*[`"]?)/gi
   let match
   while ((match = regex.exec(sqlText)) !== null) {
-    const tbl = match[1].replace(/[`"]/g, '')
-    if (!tables.includes(tbl)) tables.push(tbl)
+    const tbl = (match[1] ?? '').replace(/[`"]/g, '')
+    if (tbl && !tables.includes(tbl)) tables.push(tbl)
   }
   return tables
 }
@@ -49,7 +49,7 @@ SELECT ...
 function extractSql(text: string): string | undefined {
   const match = text.match(/```sql\s*([\s\S]*?)```/)
   if (!match) return undefined
-  const sql = match[1].trim()
+  const sql = (match[1] ?? '').trim()
   const upper = sql.toUpperCase()
   for (const kw of FORBIDDEN_KEYWORDS) {
     if (new RegExp(`\\b${kw}\\b`).test(upper)) return undefined

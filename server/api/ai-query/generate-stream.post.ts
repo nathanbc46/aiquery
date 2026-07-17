@@ -38,7 +38,7 @@ function enforceLimit(rawSql: string, maxLimit: number): { sql: string; overridd
   const limitMatch = finalSql.match(/LIMIT\s+(\d+)/i)
   let overridden = false
   if (limitMatch) {
-    if (parseInt(limitMatch[1]) > maxLimit) {
+    if (parseInt(limitMatch[1]!) > maxLimit) {
       finalSql = finalSql.replace(/LIMIT\s+\d+/i, `LIMIT ${maxLimit}`)
       overridden = true
     }
@@ -128,7 +128,9 @@ export default defineEventHandler(async (event) => {
 
         const toolResponses: any[] = []
         for (const part of fnCalls) {
-          const { name, args } = part.functionCall
+          const fnCall = (part as any).functionCall
+          if (!fnCall) continue
+          const { name, args } = fnCall
           const stepStart = Date.now()
 
           await send({ type: 'step_start', tool: name, args: args ?? {}, elapsed: elapsed() })
