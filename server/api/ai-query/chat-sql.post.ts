@@ -25,26 +25,26 @@ function extractTableNames(sqlText: string): string[] {
 
 const FORBIDDEN_KEYWORDS = ['UPDATE', 'DELETE', 'DROP', 'TRUNCATE', 'ALTER', 'INSERT', 'EXEC']
 
-const SYSTEM_INSTRUCTION = `คุณเป็น SQL Expert ผู้เชี่ยวชาญฐานข้อมูล Vtiger CRM 8.4
-ตอบคำถามเป็นภาษาไทยเสมอ กระชับ ชัดเจน และเป็นประโยชน์
-คุณสามารถแนะนำวิธีแก้ไข SQL หรืออธิบายสาเหตุที่ query ไม่ทำงานตามที่คาดไว้
+const SYSTEM_INSTRUCTION = `You are a SQL Expert for Vtiger CRM 8.4 database.
+Always respond in Thai language — concise, clear, and helpful.
+You can suggest SQL fixes or explain why a query does not work as expected.
 
-🚫 กฎเหล็ก — ห้ามเดาชื่อตารางหรือคอลัมน์โดยเด็ดขาด:
-1. ห้ามใช้ชื่อตารางหรือคอลัมน์ที่ไม่ได้ยืนยันจาก DB จริง
-2. เมื่อ Schema Context แสดง "⚠️ ตารางนี้ไม่มีอยู่ใน DB" → ห้ามใช้ชื่อตารางนั้นในคำตอบเด็ดขาด ต้องเรียก list_tables() ก่อน
-3. เมื่อ Error บอกว่า "Table X doesn't exist" → ห้ามสมมติ/เดา/แนะนำชื่อตาราง X หรือชื่อใกล้เคียง ต้องเรียก list_tables() เพื่อหาชื่อที่ถูกต้องจาก DB จริงก่อนเสนอ SQL ทุกครั้ง
+STRICT RULES — never guess table or column names:
+1. Never use table/column names not confirmed from the real DB.
+2. If Schema Context shows a table does not exist in DB, never use that name. Call list_tables() first.
+3. If an error says "Table X doesn't exist", do not guess or suggest X or similar names. Call list_tables() to find the real name before proposing any SQL.
 
-⚙️ ขั้นตอนบังคับเมื่อตารางไม่มีอยู่:
-- เรียก list_tables(module_hint) เพื่อดูรายชื่อตารางที่มีจริง
-- เรียก describe_table(ชื่อที่พบ) เพื่อยืนยันคอลัมน์
-- จากนั้นเสนอ SQL ที่ใช้ชื่อตารางที่พบจากขั้นตอนข้างต้นเท่านั้น
+MANDATORY STEPS when a table does not exist:
+- Call list_tables(module_hint) to see real table names.
+- Call describe_table(found_name) to verify columns.
+- Only then propose SQL using names discovered above.
 
-หากคุณเสนอ SQL ที่ปรับปรุงแล้ว ให้ใส่ไว้ใน code block เช่น:
+When proposing improved SQL, wrap it in a code block:
 \`\`\`sql
 SELECT ...
 \`\`\`
 
-กฎความปลอดภัย: อนุญาตเฉพาะ SELECT เท่านั้น ห้ามแนะนำ UPDATE, DELETE, DROP, INSERT, TRUNCATE, ALTER`
+Security: SELECT only. Never suggest UPDATE, DELETE, DROP, INSERT, TRUNCATE, ALTER.`
 
 function extractSql(text: string): string | undefined {
   const match = text.match(/```sql\s*([\s\S]*?)```/)
@@ -99,8 +99,7 @@ export default defineEventHandler(async (event) => {
             const cols = await dispatchTool('describe_table', { table_name: tbl }, session.role ?? 'user') as any[]
             if (!Array.isArray(cols) || cols.length === 0) continue
             if (cols[0]?.column === 'error') {
-              // ตารางนี้ไม่มีอยู่ — บอก AI ตรงๆ เพื่อให้ค้นหาชื่อที่ถูกต้อง
-              liveSchemas.push(`### ${tbl}\n⚠️ ตารางนี้ไม่มีอยู่ใน DB: ${cols[0].comment}\nให้ใช้ list_tables หรือ search_columns เพื่อหาชื่อตารางที่ถูกต้อง`)
+              liveSchemas.push(`### ${tbl}\nWARNING: Table does not exist in DB: ${cols[0].comment}\nUse list_tables or search_columns to find the correct table name.`)
             } else {
               const colLines = cols.map((c: any) =>
                 `  - ${c.column}: ${c.type}${c.key === 'PRI' ? ' (PK)' : ''}${c.nullable === 'NO' ? ' NOT NULL' : ''}${c.comment ? ` -- ${c.comment}` : ''}`
@@ -111,33 +110,39 @@ export default defineEventHandler(async (event) => {
         }
 
         const liveSchemaText = liveSchemas.length > 0
-          ? `## โครงสร้างตารางที่ใช้ใน SQL (ข้อมูลจริงจาก DB)\n\n${liveSchemas.join('\n\n')}`
+          ? `## Live Table Schema (verified from DB — use only these columns)\n\n${liveSchemas.join('\n\n')}`
           : ''
         const fallbackSchema = schemaContext.trim() || settings[0]?.generateSystemInstruction || ''
         const dbSchema = liveSchemaText || fallbackSchema
         if (dbSchema) {
-          instruction += `\n\n## Database Schema Context — ใช้เฉพาะคอลัมน์เหล่านี้เท่านั้น ห้าม hallucinate\n${dbSchema}`
+          instruction += `\n\n## Database Schema Context — use only these columns, do not hallucinate\n${dbSchema}`
         }
         if (customHints?.trim()) {
           instruction += `\n\n## Business Rules & Custom Hints\n${customHints.trim()}`
         }
       } catch { /* ใช้ default */ }
 
+      let chatModelName = DEFAULT_AGENTIC_MODEL
+      try {
+        const modelSettings = await db.select().from(aiSettings).where(eq(aiSettings.id, 'global')).limit(1)
+        if (modelSettings[0]?.agenticModel) chatModelName = modelSettings[0].agenticModel
+      } catch { /* ใช้ default */ }
+
       const genAI = new GoogleGenerativeAI(apiKey)
       const model = genAI.getGenerativeModel({
-        model: DEFAULT_AGENTIC_MODEL,
+        model: chatModelName,
         systemInstruction: instruction
       })
 
       const contextParts: string[] = []
-      if (sql.trim()) contextParts.push(`**SQL ปัจจุบัน:**\n\`\`\`sql\n${sql}\n\`\`\``)
-      if (error.trim()) contextParts.push(`**Error ที่พบ:**\n\`\`\`\n${error}\n\`\`\``)
+      if (sql.trim()) contextParts.push(`**[CURRENT SQL] — Active SQL in editor. Always use this as reference, ignoring any SQL from chat history.**\n\`\`\`sql\n${sql}\n\`\`\``)
+      if (error.trim()) contextParts.push(`**DB Error:**\n\`\`\`\n${error}\n\`\`\``)
       const contextMessage = contextParts.join('\n\n')
 
       const history: { role: 'user' | 'model'; parts: { text: string }[] }[] = []
       if (contextMessage) {
-        history.push({ role: 'user', parts: [{ text: `${contextMessage}\n\nช่วยวิเคราะห์ SQL นี้ให้หน่อย` }] })
-        history.push({ role: 'model', parts: [{ text: 'รับทราบครับ ผมได้อ่าน SQL และ error ที่แจ้งมาแล้ว กรุณาถามได้เลย' }] })
+        history.push({ role: 'user', parts: [{ text: `${contextMessage}\n\nPlease review this SQL.` }] })
+        history.push({ role: 'model', parts: [{ text: 'Understood. I have read the current SQL from the editor. Please ask your question.' }] })
       }
       for (const msg of messages) {
         history.push({ role: msg.role, parts: [{ text: msg.text }] })
@@ -180,7 +185,7 @@ export default defineEventHandler(async (event) => {
         try { rawText = chatResult.response.text() } catch { /* จะ force ด้านล่าง */ }
         if (stillHasFnCalls || !rawText.trim()) {
           chatResult = await chat.sendMessage(
-            'กรุณาตอบเป็นข้อความภาษาไทยได้เลย อย่าเรียก tool เพิ่มเติมแล้ว'
+            'Please respond in Thai text now. Do not call any more tools.'
           )
         }
       }
@@ -188,7 +193,7 @@ export default defineEventHandler(async (event) => {
       const chatSqlUsage = chatResult.response.usageMetadata
       logTokenUsage({
         endpoint: 'chat-sql',
-        modelUsed: DEFAULT_AGENTIC_MODEL,
+        modelUsed: chatModelName,
         userId: session.userId,
         tokensIn: chatSqlUsage?.promptTokenCount ?? 0,
         tokensOut: chatSqlUsage?.candidatesTokenCount ?? 0,

@@ -1060,6 +1060,14 @@ const scrollSqlChatToBottom = async () => {
   }
 }
 
+// ล้างประวัติแชตและเริ่มใหม่โดยใช้ SQL ปัจจุบัน
+function startNewChat() {
+  sqlChatMessages.value = []
+  sqlChatInput.value = ''
+  sqlChatStatus.value = ''
+  toast.info('เริ่มแชตใหม่โดยใช้ SQL ปัจจุบันใน Editor')
+}
+
 // SQL Chat functions
 const sendSqlChat = async () => {
   const q = sqlChatInput.value.trim()
@@ -2676,11 +2684,18 @@ const highlightSql = (sqlStr: string) => {
               <span class="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.3em] text-violet-600 dark:text-violet-400">
                 <MessageSquarePlus class="w-3.5 h-3.5" /> ถามเกี่ยวกับ SQL นี้
               </span>
-              <button type="button" @click="isSqlChatOpen = false"
-                class="p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all"
-                title="ปิดแชต">
-                <X class="w-4 h-4" />
-              </button>
+              <div class="flex items-center gap-1">
+                <button type="button" @click="startNewChat" :disabled="sqlChatMessages.length === 0"
+                  class="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-semibold text-violet-600 dark:text-violet-400 hover:bg-violet-100 dark:hover:bg-violet-900/40 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                  title="ล้างประวัติแชตและเริ่มใหม่โดยใช้ SQL ปัจจุบัน">
+                  <RotateCcw class="w-3 h-3" /> เริ่มแชตใหม่
+                </button>
+                <button type="button" @click="isSqlChatOpen = false"
+                  class="p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all"
+                  title="ปิดแชต">
+                  <X class="w-4 h-4" />
+                </button>
+              </div>
             </div>
             <!-- Messages -->
             <div ref="sqlChatScrollRef" class="flex-1 overflow-y-auto p-3 space-y-2 bg-white dark:bg-slate-900 min-h-0">
