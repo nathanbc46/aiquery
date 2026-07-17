@@ -26,7 +26,7 @@ definePageMeta({
 const toast = useToast()
 const isLoading = ref(true)
 const isSaving = ref(false)
-const activeTab = ref<'sql'|'agentic'|'refine'|'analyze'|'chat'>('sql')
+const activeTab = ref<'sql'|'agentic'|'refine'|'analyze'|'chat'>('agentic')
 
 const settings = ref({
   refineModel: '',
@@ -269,8 +269,8 @@ onMounted(() => {
         <!-- Tab navigation -->
         <div class="flex overflow-x-auto border-b border-slate-200 dark:border-slate-800 scrollbar-none">
           <button v-for="tab in [
-            { key: 'sql',    label: 'SQL Generation',    icon: 'terminal',  color: 'blue'   },
             { key: 'agentic',label: 'Agentic Mode',      icon: 'zap',       color: 'violet' },
+            { key: 'sql',    label: 'SQL Generation',    icon: 'terminal',  color: 'blue'   },
             { key: 'refine', label: 'Prompt Refinement', icon: 'sparkles',  color: 'indigo' },
             { key: 'analyze',label: 'Data Analysis',     icon: 'chart',     color: 'violet' },
             { key: 'chat',   label: 'Data Chatbot',      icon: 'bot',       color: 'teal'   },
