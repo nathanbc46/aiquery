@@ -28,22 +28,22 @@
 
     <!-- Summary Cards -->
     <div v-if="data" class="grid grid-cols-2 lg:grid-cols-4 gap-4">
-      <div class="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm border border-gray-200 dark:border-gray-700">
+      <div class="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm border border-gray-200 dark:border-gray-700 text-right">
         <p class="text-xs text-gray-500 dark:text-gray-400 mb-1">จำนวนการเรียกใช้</p>
         <p class="text-2xl font-bold text-gray-900 dark:text-white">{{ data.summary.totalCalls.toLocaleString() }}</p>
         <p class="text-xs text-gray-400 mt-1">ครั้ง</p>
       </div>
-      <div class="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm border border-gray-200 dark:border-gray-700">
+      <div class="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm border border-gray-200 dark:border-gray-700 text-right">
         <p class="text-xs text-gray-500 dark:text-gray-400 mb-1">Token Input รวม</p>
         <p class="text-2xl font-bold text-blue-600 dark:text-blue-400">{{ formatNumber(data.summary.totalTokensIn) }}</p>
         <p class="text-xs text-gray-400 mt-1">tokens</p>
       </div>
-      <div class="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm border border-gray-200 dark:border-gray-700">
+      <div class="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm border border-gray-200 dark:border-gray-700 text-right">
         <p class="text-xs text-gray-500 dark:text-gray-400 mb-1">Token Output รวม</p>
         <p class="text-2xl font-bold text-emerald-600 dark:text-emerald-400">{{ formatNumber(data.summary.totalTokensOut) }}</p>
         <p class="text-xs text-gray-400 mt-1">tokens</p>
       </div>
-      <div class="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm border border-gray-200 dark:border-gray-700">
+      <div class="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm border border-gray-200 dark:border-gray-700 text-right">
         <p class="text-xs text-gray-500 dark:text-gray-400 mb-1">ค่าใช้จ่ายโดยประมาณ</p>
         <p class="text-2xl font-bold text-amber-600 dark:text-amber-400">{{ data.summary.totalCostTHB.toFixed(2) }}</p>
         <p class="text-xs text-gray-400 mt-1">บาท (THB)</p>
