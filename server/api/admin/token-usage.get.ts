@@ -5,6 +5,9 @@ import { desc, gte, sql } from 'drizzle-orm'
 import { THB_PER_USD } from '../../utils/constants'
 
 export const MODEL_COST: Record<string, { inPer1M: number; outPer1M: number }> = {
+  'gemini-3.5-flash':      { inPer1M: 1.50,   outPer1M: 9.00  },
+  'gemini-3.1-pro':        { inPer1M: 2.00,   outPer1M: 12.00 },
+  'gemini-3.1-flash-lite': { inPer1M: 0.25,   outPer1M: 1.50  },
   'gemini-2.5-pro':        { inPer1M: 1.25,   outPer1M: 10.00 },
   'gemini-2.5-flash':      { inPer1M: 0.30,   outPer1M: 2.50  },
   'gemini-2.5-flash-lite': { inPer1M: 0.10,   outPer1M: 0.40  },
