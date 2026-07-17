@@ -51,7 +51,7 @@
       <div class="overflow-x-auto">
         <table class="w-full text-sm">
           <thead>
-            <tr class="text-xs text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-750">
+            <tr class="text-xs text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-700">
               <th class="px-4 py-3 text-left font-medium">Endpoint</th>
               <th class="px-4 py-3 text-right font-medium">จำนวนครั้ง</th>
               <th class="px-4 py-3 text-right font-medium">Token In</th>
@@ -60,7 +60,7 @@
             </tr>
           </thead>
           <tbody class="divide-y divide-gray-100 dark:divide-gray-700">
-            <tr v-for="ep in data.byEndpoint" :key="ep.endpoint" class="hover:bg-gray-50 dark:hover:bg-gray-750">
+            <tr v-for="ep in data.byEndpoint" :key="ep.endpoint" class="hover:bg-gray-50 dark:hover:bg-gray-700">
               <td class="px-4 py-3 font-medium text-gray-900 dark:text-white">{{ ep.label }}</td>
               <td class="px-4 py-3 text-right text-gray-600 dark:text-gray-300">{{ ep.calls.toLocaleString() }}</td>
               <td class="px-4 py-3 text-right text-blue-600 dark:text-blue-400">{{ formatNumber(ep.tokensIn) }}</td>
@@ -80,7 +80,7 @@
       <div class="overflow-x-auto">
         <table class="w-full text-sm">
           <thead>
-            <tr class="text-xs text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-750">
+            <tr class="text-xs text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-700">
               <th class="px-4 py-3 text-left font-medium">เวลา</th>
               <th class="px-4 py-3 text-left font-medium">Endpoint</th>
               <th class="px-4 py-3 text-left font-medium">Model</th>
@@ -92,7 +92,7 @@
             </tr>
           </thead>
           <tbody class="divide-y divide-gray-100 dark:divide-gray-700">
-            <tr v-for="r in data.recent" :key="r.id" class="hover:bg-gray-50 dark:hover:bg-gray-750">
+            <tr v-for="r in data.recent" :key="r.id" class="hover:bg-gray-50 dark:hover:bg-gray-700">
               <td class="px-4 py-2.5 text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">{{ formatDate(r.createdAt) }}</td>
               <td class="px-4 py-2.5 text-gray-800 dark:text-gray-200">{{ r.label }}</td>
               <td class="px-4 py-2.5 text-xs text-gray-500 dark:text-gray-400">{{ shortModel(r.modelUsed) }}</td>
