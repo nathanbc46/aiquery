@@ -1,5 +1,6 @@
 export const DEFAULT_MAX_RESULTS_LIMIT = 5000;
 export const DEFAULT_AGENTIC_MAX_ITERATIONS = 12;
+export const THB_PER_USD = 35;
 
 export const SUGGESTED_QUERIES = [
   "leads ใน campaign 'Quotation - SolidWorks'",

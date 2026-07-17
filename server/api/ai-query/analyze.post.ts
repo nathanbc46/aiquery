@@ -88,7 +88,7 @@ export default defineEventHandler(async (event) => {
     // 4. ส่งข้อมูลให้ Gemini สรุป
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({
-      model: settings.analyzeModel || 'gemini-2.0-flash',
+      model: settings.analyzeModel || DEFAULT_ANALYZE_MODEL,
       systemInstruction: settings.analyzeSystemInstruction
     });
 
@@ -131,7 +131,7 @@ ${dataText}
     const analyzeUsage = result.response.usageMetadata
     logTokenUsage({
       endpoint: 'analyze',
-      modelUsed: settings.analyzeModel || 'gemini-2.0-flash',
+      modelUsed: settings.analyzeModel || DEFAULT_ANALYZE_MODEL,
       userId: session.userId,
       tokensIn: analyzeUsage?.promptTokenCount ?? 0,
       tokensOut: analyzeUsage?.candidatesTokenCount ?? 0,

@@ -1,6 +1,7 @@
 import { useDb } from '../../utils/db';
 import { aiSettings } from '../../utils/schema';
 import { eq } from 'drizzle-orm';
+import { DEFAULT_AGENTIC_MODEL, DEFAULT_AGENTIC_MAX_ITERATIONS } from '../../utils/constants';
 
 export default defineEventHandler(async (event) => {
   const db = await useDb();
@@ -46,9 +47,9 @@ export default defineEventHandler(async (event) => {
           useHybridSchema,
           isDebugMode,
           customHints: customHints ?? null,
-          agenticModel: agenticModel ?? 'gemini-2.5-flash',
+          agenticModel: agenticModel ?? DEFAULT_AGENTIC_MODEL,
           generateMode: generateMode ?? 'agentic',
-          agenticMaxIterations: agenticMaxIterations ?? 12
+          agenticMaxIterations: agenticMaxIterations ?? DEFAULT_AGENTIC_MAX_ITERATIONS
         })
         .where(eq(aiSettings.id, 'global'));
     } else {

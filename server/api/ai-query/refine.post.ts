@@ -4,8 +4,10 @@ import { aiSettings } from '../../utils/schema';
 import { eq } from 'drizzle-orm';
 import { DEFAULT_REFINE_INSTRUCTION, DEFAULT_REFINE_MODEL, DEFAULT_GENERATE_INSTRUCTION } from '../../utils/constants';
 import { logTokenUsage } from '../../utils/tokenLogger';
+import { getAuthSession } from '../../utils/auth';
 
 export default defineEventHandler(async (event) => {
+  const session = await getAuthSession(event)
   const body = await readBody(event);
   const { prompt } = body;
 
@@ -55,6 +57,7 @@ NO JSON, NO Markdown code blocks, NO explanations. Just the final sentence.`;
     logTokenUsage({
       endpoint: 'refine',
       modelUsed: modelName,
+      userId: session.userId,
       tokensIn: refineUsage?.promptTokenCount ?? 0,
       tokensOut: refineUsage?.candidatesTokenCount ?? 0,
       durationMs: Date.now() - refineStart,

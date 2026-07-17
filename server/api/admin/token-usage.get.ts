@@ -2,19 +2,16 @@ import { useDb } from '../../utils/db'
 import { aiTokenUsage } from '../../utils/schema'
 import { requireAuthRole } from '../../utils/auth'
 import { desc, gte, sql } from 'drizzle-orm'
+import { THB_PER_USD } from '../../utils/constants'
 
-const MODEL_COST: Record<string, { inPer1M: number; outPer1M: number }> = {
-  'gemini-3.5-flash':      { inPer1M: 1.50,   outPer1M: 9.00  },
-  'gemini-3.1-pro':        { inPer1M: 2.00,   outPer1M: 12.00 },
-  'gemini-3.1-flash-lite': { inPer1M: 0.25,   outPer1M: 1.50  },
+export const MODEL_COST: Record<string, { inPer1M: number; outPer1M: number }> = {
   'gemini-2.5-pro':        { inPer1M: 1.25,   outPer1M: 10.00 },
-  'gemini-2.5-flash-lite': { inPer1M: 0.10,   outPer1M: 0.40  },
   'gemini-2.5-flash':      { inPer1M: 0.30,   outPer1M: 2.50  },
+  'gemini-2.5-flash-lite': { inPer1M: 0.10,   outPer1M: 0.40  },
   'gemini-2.0-flash':      { inPer1M: 0.10,   outPer1M: 0.40  },
   'gemini-1.5-flash':      { inPer1M: 0.075,  outPer1M: 0.30  },
   'gemini-1.5-flash-8b':   { inPer1M: 0.0375, outPer1M: 0.15  },
 }
-const THB_PER_USD = 35
 
 function estimateCostTHB(model: string, tokensIn: number, tokensOut: number): number {
   const key = Object.keys(MODEL_COST).find(k => (model || '').toLowerCase().includes(k)) ?? 'gemini-2.5-flash'
@@ -98,6 +95,14 @@ export default defineEventHandler(async (event) => {
     createdAt: r.createdAt,
   }))
 
+  const modelPricing = Object.entries(MODEL_COST).map(([name, p]) => ({
+    name,
+    inUSD: p.inPer1M,
+    outUSD: p.outPer1M,
+    inTHB: parseFloat((p.inPer1M * THB_PER_USD).toFixed(2)),
+    outTHB: parseFloat((p.outPer1M * THB_PER_USD).toFixed(2)),
+  }))
+
   return {
     days,
     summary: {
@@ -109,5 +114,7 @@ export default defineEventHandler(async (event) => {
     },
     byEndpoint,
     recent,
+    modelPricing,
+    thbPerUsd: THB_PER_USD,
   }
 })

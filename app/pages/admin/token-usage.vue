@@ -158,11 +158,10 @@
                   </tr>
                 </thead>
                 <tbody class="divide-y divide-gray-100 dark:divide-gray-700">
-                  <tr v-for="m in MODEL_PRICING" :key="m.name"
-                    :class="['transition-colors hover:bg-gray-50 dark:hover:bg-gray-700/50', m.highlight ? 'bg-violet-50/50 dark:bg-violet-900/10' : '']">
+                  <tr v-for="m in (data?.modelPricing ?? [])" :key="m.name"
+                    class="transition-colors hover:bg-gray-50 dark:hover:bg-gray-700/50">
                     <td class="px-4 py-3">
                       <span class="font-mono text-xs font-semibold text-gray-800 dark:text-gray-200">{{ m.name }}</span>
-                      <span v-if="m.highlight" class="ml-2 text-[10px] px-1.5 py-0.5 bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300 rounded-full font-medium">default</span>
                     </td>
                     <td class="px-4 py-3 text-right text-blue-600 dark:text-blue-400 font-mono text-xs">${{ m.inUSD }}</td>
                     <td class="px-4 py-3 text-right text-emerald-600 dark:text-emerald-400 font-mono text-xs">${{ m.outUSD }}</td>
@@ -173,7 +172,7 @@
               </table>
 
               <div class="mt-4 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg text-xs text-amber-700 dark:text-amber-300">
-                <strong>หมายเหตุ:</strong> ราคาเป็นการประมาณการเท่านั้น ราคาจริงอาจแตกต่างตาม Google AI Studio Pricing และ context caching
+                <strong>หมายเหตุ:</strong> ราคาเป็นการประมาณการเท่านั้น อัตราแลกเปลี่ยน {{ data?.thbPerUsd ?? 35 }} THB/USD · ราคาจริงอาจแตกต่างตาม Google AI Studio Pricing และ context caching
               </div>
             </div>
           </div>
@@ -190,17 +189,6 @@ definePageMeta({ layout: 'default' })
 
 const days = ref(30)
 const showPricing = ref(false)
-
-const THB_PER_USD = 35
-
-const MODEL_PRICING = [
-  { name: 'gemini-2.5-pro',        inUSD: '1.25',  outUSD: '10.00', inTHB: (1.25  * THB_PER_USD).toFixed(2), outTHB: (10.00 * THB_PER_USD).toFixed(2), highlight: false },
-  { name: 'gemini-2.5-flash',      inUSD: '0.30',  outUSD: '2.50',  inTHB: (0.30  * THB_PER_USD).toFixed(2), outTHB: (2.50  * THB_PER_USD).toFixed(2), highlight: true  },
-  { name: 'gemini-2.5-flash-lite', inUSD: '0.10',  outUSD: '0.40',  inTHB: (0.10  * THB_PER_USD).toFixed(2), outTHB: (0.40  * THB_PER_USD).toFixed(2), highlight: false },
-  { name: 'gemini-2.0-flash',      inUSD: '0.10',  outUSD: '0.40',  inTHB: (0.10  * THB_PER_USD).toFixed(2), outTHB: (0.40  * THB_PER_USD).toFixed(2), highlight: false },
-  { name: 'gemini-1.5-flash',      inUSD: '0.075', outUSD: '0.30',  inTHB: (0.075 * THB_PER_USD).toFixed(2), outTHB: (0.30  * THB_PER_USD).toFixed(2), highlight: false },
-  { name: 'gemini-1.5-flash-8b',   inUSD: '0.038', outUSD: '0.15',  inTHB: (0.0375* THB_PER_USD).toFixed(2), outTHB: (0.15  * THB_PER_USD).toFixed(2), highlight: false },
-]
 
 const { data, pending, refresh } = useFetch('/api/admin/token-usage', {
   query: computed(() => ({ days: days.value })),

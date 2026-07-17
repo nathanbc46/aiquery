@@ -4,8 +4,10 @@ import { aiSettings } from '../../utils/schema';
 import { eq } from 'drizzle-orm';
 import { DEFAULT_OPTIMIZE_MODEL } from '../../utils/constants';
 import { logTokenUsage } from '../../utils/tokenLogger';
+import { getAuthSession } from '../../utils/auth';
 
 export default defineEventHandler(async (event) => {
+  const session = await getAuthSession(event)
   const body = await readBody(event);
   const { sql: originalSql, explanation: originalExplanation } = body;
 
@@ -70,6 +72,7 @@ ${originalExplanation || ''}`;
     logTokenUsage({
       endpoint: 'optimize',
       modelUsed: modelName,
+      userId: session.userId,
       tokensIn: optimizeUsage?.promptTokenCount ?? 0,
       tokensOut: optimizeUsage?.candidatesTokenCount ?? 0,
       durationMs: Date.now() - optimizeStart,

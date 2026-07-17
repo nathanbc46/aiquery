@@ -3,7 +3,8 @@ import {
   DEFAULT_AGENTIC_SYSTEM_PROMPT,
   DEFAULT_AGENTIC_MODEL,
   DEFAULT_MAX_RESULTS_LIMIT,
-  DEFAULT_GENERATE_INSTRUCTION
+  DEFAULT_GENERATE_INSTRUCTION,
+  DEFAULT_AGENTIC_MAX_ITERATIONS
 } from '../../utils/constants'
 import { useDb } from '../../utils/db'
 import { sql, eq } from 'drizzle-orm'
@@ -41,7 +42,7 @@ export default defineEventHandler(async (event) => {
     let maxLimit = DEFAULT_MAX_RESULTS_LIMIT
     let modelName = DEFAULT_AGENTIC_MODEL
     let customHints = ''
-    let MAX_ITERATIONS = 8
+    let MAX_ITERATIONS = DEFAULT_AGENTIC_MAX_ITERATIONS
 
     try {
       const settings = await db.select().from(aiSettings).where(eq(aiSettings.id, 'global')).limit(1)
@@ -122,7 +123,7 @@ export default defineEventHandler(async (event) => {
     // ถ้าเกิน MAX_ITERATIONS → fallback เป็น hybrid static mode
     if (iteration >= MAX_ITERATIONS) {
       console.warn('[Agentic] MAX_ITERATIONS reached, falling back to hybrid static mode')
-      return fallbackToStaticMode(prompt, contextData, maxLimit, session, db, isDebugMode, MAX_ITERATIONS)
+      return fallbackToStaticMode(prompt, contextData, maxLimit, session, db, isDebugMode, MAX_ITERATIONS, modelName)
     }
 
     // Parse JSON response จาก AI
@@ -250,7 +251,8 @@ async function fallbackToStaticMode(
   session: any,
   db: any,
   isDebugMode: boolean,
-  maxIterations: number = 8
+  maxIterations: number = DEFAULT_AGENTIC_MAX_ITERATIONS,
+  modelName: string = DEFAULT_AGENTIC_MODEL
 ) {
   const apiKey = process.env.GEMINI_API_KEY!
 
@@ -260,7 +262,7 @@ async function fallbackToStaticMode(
 
   const genAI = new GoogleGenerativeAI(apiKey)
   const model = genAI.getGenerativeModel({
-    model: 'gemini-3.5-flash',
+    model: modelName,
     systemInstruction: instruction
   })
 
@@ -302,7 +304,7 @@ async function fallbackToStaticMode(
     reasoningSteps: ['(fallback: static hybrid mode — agentic loop exceeded max iterations)'],
     mode: 'static-fallback',
     iterationsUsed: maxIterations,
-    modelUsed: 'gemini-2.0-flash'
+    modelUsed: modelName
   }
 }
 
