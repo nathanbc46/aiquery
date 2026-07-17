@@ -11,6 +11,7 @@ import { sql, eq } from 'drizzle-orm'
 import { aiSettings } from '../../utils/schema'
 import { getAuthSession } from '../../utils/auth'
 import { TOOL_DECLARATIONS, dispatchTool } from '../../utils/schemaTools'
+import { logTokenUsage } from '../../utils/tokenLogger'
 
 // MAX_ITERATIONS ถูก override จาก admin settings (agenticMaxIterations)
 const FORBIDDEN_KEYWORDS = ['UPDATE', 'DELETE', 'DROP', 'TRUNCATE', 'ALTER', 'INSERT', 'EXEC']
@@ -263,6 +264,17 @@ export default defineEventHandler(async (event) => {
       const schemaContext = schemaContextParts.length > 0
         ? `## Schema ที่ระบบสำรวจระหว่างสร้าง SQL\n\n${schemaContextParts.join('\n\n')}`
         : ''
+
+      const streamUsage = chatResult.response.usageMetadata
+      logTokenUsage({
+        endpoint: 'stream',
+        modelUsed: agenticModelName,
+        userId: session.userId,
+        tokensIn: streamUsage?.promptTokenCount ?? 0,
+        tokensOut: streamUsage?.candidatesTokenCount ?? 0,
+        iterations: iteration + 1,
+        durationMs: elapsed(),
+      })
 
       // Done
       await send({

@@ -17,7 +17,8 @@ import {
   Mail,
   UserCircle,
   Bot,
-  Download
+  Download,
+  BarChart2
 } from 'lucide-vue-next'
 
 const isMobileMenuOpen = ref(false)
@@ -99,6 +100,7 @@ const adminSettingsItems = computed(() => {
     { to: '/admin/users', label: 'จัดการผู้ใช้งาน', icon: Users },
     { to: '/admin/ai-settings', label: 'ตั้งค่า AI', icon: Cpu },
     { to: '/admin/mail-settings', label: 'ตั้งค่า Server Mail', icon: Mail },
+    { to: '/admin/token-usage', label: 'Token Usage', icon: BarChart2 },
   ]
 })
 

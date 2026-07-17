@@ -106,3 +106,16 @@ export const aiFavorites = mysqlTable('ai_favorites', {
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow().onUpdateNow(),
 });
+
+export const aiTokenUsage = mysqlTable('ai_token_usage', {
+  id: int('id').primaryKey().autoincrement(),
+  endpoint: varchar('endpoint', { length: 50 }).notNull(),
+  modelUsed: varchar('model_used', { length: 100 }),
+  userId: varchar('user_id', { length: 36 }),
+  tokensIn: int('tokens_in').default(0),
+  tokensOut: int('tokens_out').default(0),
+  totalTokens: int('total_tokens').default(0),
+  iterations: int('iterations').default(1),
+  durationMs: int('duration_ms'),
+  createdAt: timestamp('created_at').defaultNow(),
+});

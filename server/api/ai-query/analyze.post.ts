@@ -3,6 +3,7 @@ import { useDb } from '../../utils/db';
 import { aiQueryRequests, aiSettings } from '../../utils/schema';
 import { eq, sql } from 'drizzle-orm';
 import { getAuthSession } from '../../utils/auth';
+import { logTokenUsage } from '../../utils/tokenLogger';
 
 import { 
   DEFAULT_ANALYZE_MODEL, 
@@ -125,7 +126,17 @@ ${dataText}
 
 ประเภทที่ใช้ได้: bar, line, area, pie, donut เท่านั้น ห้ามใช้รูปแบบอื่น`;
 
+    const analyzeStart = Date.now()
     const result = await model.generateContent(analyzePrompt);
+    const analyzeUsage = result.response.usageMetadata
+    logTokenUsage({
+      endpoint: 'analyze',
+      modelUsed: settings.analyzeModel || 'gemini-2.0-flash',
+      userId: session.userId,
+      tokensIn: analyzeUsage?.promptTokenCount ?? 0,
+      tokensOut: analyzeUsage?.candidatesTokenCount ?? 0,
+      durationMs: Date.now() - analyzeStart,
+    })
     const summary = result.response.text().trim();
 
     return {

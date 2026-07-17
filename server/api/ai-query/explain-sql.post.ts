@@ -4,6 +4,7 @@ import { aiSettings } from '../../utils/schema';
 import { eq } from 'drizzle-orm';
 import { getAuthSession } from '../../utils/auth';
 import { DEFAULT_REFINE_MODEL } from '../../utils/constants';
+import { logTokenUsage } from '../../utils/tokenLogger';
 
 export default defineEventHandler(async (event) => {
   const session = await getAuthSession(event);
@@ -39,9 +40,19 @@ export default defineEventHandler(async (event) => {
 }`
     });
 
+    const explainStart = Date.now()
     const result = await model.generateContent(
       `แปลง SQL คำสั่งนี้เป็นภาษาไทยที่คนทั่วไปเข้าใจ:\n\n${sql}`
     );
+    const explainUsage = result.response.usageMetadata
+    logTokenUsage({
+      endpoint: 'explain',
+      modelUsed: modelName,
+      userId: session.userId,
+      tokensIn: explainUsage?.promptTokenCount ?? 0,
+      tokensOut: explainUsage?.candidatesTokenCount ?? 0,
+      durationMs: Date.now() - explainStart,
+    })
 
     const raw = result.response.text().trim();
 

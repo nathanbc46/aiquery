@@ -5,6 +5,7 @@ import { sql, eq } from 'drizzle-orm';
 import { aiSettings } from '../../utils/schema';
 import { getAuthSession } from '../../utils/auth';
 import { pruneSchema } from '../../utils/schemaPruning';
+import { logTokenUsage } from '../../utils/tokenLogger';
 
 export default defineEventHandler(async (event) => {
   // 1. ตรวจสอบสิทธิ์
@@ -106,7 +107,17 @@ export default defineEventHandler(async (event) => {
       finalPrompt += `- ให้ความสำคัญกับการ Join ตารางใน Vtiger ให้ถูกต้องตาม Schema`;
     }
 
+    const startTime = Date.now()
     const result = await model.generateContent(finalPrompt);
+    const usage = result.response.usageMetadata
+    logTokenUsage({
+      endpoint: 'generate',
+      modelUsed: modelName,
+      userId: session.userId,
+      tokensIn: usage?.promptTokenCount ?? 0,
+      tokensOut: usage?.candidatesTokenCount ?? 0,
+      durationMs: Date.now() - startTime,
+    })
     let responseText = result.response.text().trim();
     
     // Clean up Markdown code block formatting if Gemini ignored the instruction

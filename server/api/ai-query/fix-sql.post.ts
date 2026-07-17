@@ -6,6 +6,7 @@ import { eq } from 'drizzle-orm';
 import { getAuthSession } from '../../utils/auth';
 import { DEFAULT_REFINE_MODEL, DEFAULT_GENERATE_INSTRUCTION } from '../../utils/constants';
 import { dispatchTool, TOOL_DECLARATIONS } from '../../utils/schemaTools';
+import { logTokenUsage } from '../../utils/tokenLogger';
 
 // ไม่รวม sample_data สำหรับ fix context
 const FIX_TOOL_DECLARATIONS = TOOL_DECLARATIONS.filter(t => t.name !== 'sample_data')
@@ -103,6 +104,7 @@ ${initialSchema}
         `โปรดตรวจสอบ SQL ทั้งหมดเทียบกับ Schema ด้านบน และค้นหาตารางเพิ่มเติมถ้าจำเป็น ` +
         `แล้วแก้ไขทุกปัญหาพร้อมกันในครั้งเดียว ส่งคืนเป็น JSON`;
 
+      const fixSqlStart = Date.now()
       let chatResult = await chat.sendMessage(prompt);
 
       // Mini agentic loop — AI อาจค้นหา schema เพิ่มเติม (max 5 รอบ)
@@ -138,6 +140,16 @@ ${initialSchema}
           );
         }
       }
+
+      const fixSqlUsage = chatResult.response.usageMetadata
+      logTokenUsage({
+        endpoint: 'fix-sql',
+        modelUsed: modelName,
+        userId: session.userId,
+        tokensIn: fixSqlUsage?.promptTokenCount ?? 0,
+        tokensOut: fixSqlUsage?.candidatesTokenCount ?? 0,
+        durationMs: Date.now() - fixSqlStart,
+      })
 
       let raw: string;
       try {

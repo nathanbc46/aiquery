@@ -6,6 +6,7 @@ import { aiSettings } from '../../utils/schema'
 import { getAuthSession } from '../../utils/auth'
 import { DEFAULT_AGENTIC_MODEL } from '../../utils/constants'
 import { dispatchTool, TOOL_DECLARATIONS } from '../../utils/schemaTools'
+import { logTokenUsage } from '../../utils/tokenLogger'
 
 // ไม่รวม sample_data — ไม่เหมาะกับ chat context (ป้องกันข้อมูล sensitive รั่ว)
 const CHAT_TOOL_DECLARATIONS = TOOL_DECLARATIONS.filter(t => t.name !== 'sample_data')
@@ -147,6 +148,7 @@ export default defineEventHandler(async (event) => {
         tools: [{ functionDeclarations: CHAT_TOOL_DECLARATIONS }]
       })
 
+      const chatSqlStart = Date.now()
       let chatResult = await chat.sendMessage(question)
 
       // Mini agentic loop — stream tool call status กลับ frontend (max 5 รอบ)
@@ -182,6 +184,16 @@ export default defineEventHandler(async (event) => {
           )
         }
       }
+
+      const chatSqlUsage = chatResult.response.usageMetadata
+      logTokenUsage({
+        endpoint: 'chat-sql',
+        modelUsed: DEFAULT_AGENTIC_MODEL,
+        userId: session.userId,
+        tokensIn: chatSqlUsage?.promptTokenCount ?? 0,
+        tokensOut: chatSqlUsage?.candidatesTokenCount ?? 0,
+        durationMs: Date.now() - chatSqlStart,
+      })
 
       let reply: string
       try {

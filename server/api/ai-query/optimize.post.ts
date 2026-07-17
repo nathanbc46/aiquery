@@ -3,6 +3,7 @@ import { useDb } from '../../utils/db';
 import { aiSettings } from '../../utils/schema';
 import { eq } from 'drizzle-orm';
 import { DEFAULT_OPTIMIZE_MODEL } from '../../utils/constants';
+import { logTokenUsage } from '../../utils/tokenLogger';
 
 export default defineEventHandler(async (event) => {
   const body = await readBody(event);
@@ -63,7 +64,16 @@ ${originalSql}
 Original logic explanation (for your context):
 ${originalExplanation || ''}`;
 
+    const optimizeStart = Date.now()
     const optimizeResult = await optimizerModel.generateContent(optimizePromptStr);
+    const optimizeUsage = optimizeResult.response.usageMetadata
+    logTokenUsage({
+      endpoint: 'optimize',
+      modelUsed: modelName,
+      tokensIn: optimizeUsage?.promptTokenCount ?? 0,
+      tokensOut: optimizeUsage?.candidatesTokenCount ?? 0,
+      durationMs: Date.now() - optimizeStart,
+    })
     let optimizeResponseText = optimizeResult.response.text().trim();
     
     if (optimizeResponseText.startsWith('\`\`\`json')) {

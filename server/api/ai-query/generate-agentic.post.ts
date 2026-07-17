@@ -11,6 +11,7 @@ import { aiSettings } from '../../utils/schema'
 import { getAuthSession } from '../../utils/auth'
 import { TOOL_DECLARATIONS, dispatchTool } from '../../utils/schemaTools'
 import { pruneSchema } from '../../utils/schemaPruning'
+import { logTokenUsage } from '../../utils/tokenLogger'
 
 const FORBIDDEN_KEYWORDS = ['UPDATE', 'DELETE', 'DROP', 'TRUNCATE', 'ALTER', 'INSERT', 'EXEC']
 
@@ -79,6 +80,7 @@ export default defineEventHandler(async (event) => {
 
     const reasoningSteps: string[] = []
     let iteration = 0
+    const agenticStartTime = Date.now()
     let chatResult = await chat.sendMessage(finalPrompt)
 
     // Agentic loop — ทำซ้ำจนกว่า AI จะตอบ text สุดท้าย หรือเกิน MAX_ITERATIONS
@@ -201,6 +203,17 @@ export default defineEventHandler(async (event) => {
     } catch (err: any) {
       dbError = err.message || 'Database execution failed'
     }
+
+    const agenticUsage = chatResult.response.usageMetadata
+    logTokenUsage({
+      endpoint: 'agentic',
+      modelUsed: modelName,
+      userId: session.userId,
+      tokensIn: agenticUsage?.promptTokenCount ?? 0,
+      tokensOut: agenticUsage?.candidatesTokenCount ?? 0,
+      iterations: iteration + 1,
+      durationMs: Date.now() - agenticStartTime,
+    })
 
     return {
       success: true,
