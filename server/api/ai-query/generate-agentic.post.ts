@@ -12,7 +12,6 @@ import { getAuthSession } from '../../utils/auth'
 import { TOOL_DECLARATIONS, dispatchTool } from '../../utils/schemaTools'
 import { pruneSchema } from '../../utils/schemaPruning'
 
-const MAX_ITERATIONS = 8
 const FORBIDDEN_KEYWORDS = ['UPDATE', 'DELETE', 'DROP', 'TRUNCATE', 'ALTER', 'INSERT', 'EXEC']
 
 export default defineEventHandler(async (event) => {
@@ -41,6 +40,7 @@ export default defineEventHandler(async (event) => {
     let maxLimit = DEFAULT_MAX_RESULTS_LIMIT
     let modelName = DEFAULT_AGENTIC_MODEL
     let customHints = ''
+    let MAX_ITERATIONS = 8
 
     try {
       const settings = await db.select().from(aiSettings).where(eq(aiSettings.id, 'global')).limit(1)
@@ -49,6 +49,7 @@ export default defineEventHandler(async (event) => {
         maxLimit = config.maxResultsLimit || DEFAULT_MAX_RESULTS_LIMIT
         modelName = config.agenticModel || DEFAULT_AGENTIC_MODEL
         customHints = config.customHints || ''
+        if (config.agenticMaxIterations) MAX_ITERATIONS = config.agenticMaxIterations
       }
     } catch {
       // ใช้ default ถ้า settings ไม่สำเร็จ
