@@ -1,5 +1,5 @@
 import { useDb } from '../../utils/db';
-import { sql } from 'drizzle-orm';
+import { aiZohoConfig } from '../../utils/schema';
 
 export default defineEventHandler(async (event) => {
   const query = getQuery(event);
@@ -40,18 +40,23 @@ export default defineEventHandler(async (event) => {
     const expiresAt = new Date(Date.now() + expires_in * 1000);
 
     const db = await useDb();
-    
-    // Store tokens in database
-    await db.execute(sql.raw(`
-      INSERT INTO ai_zoho_config (id, client_id, client_secret, refresh_token, access_token, expires_at)
-      VALUES ('global', '${clientId}', '${clientSecret}', '${refresh_token}', '${access_token}', '${expiresAt.toISOString().slice(0, 19).replace('T', ' ')}')
-      ON DUPLICATE KEY UPDATE 
-        client_id = VALUES(client_id),
-        client_secret = VALUES(client_secret),
-        refresh_token = VALUES(refresh_token),
-        access_token = VALUES(access_token),
-        expires_at = VALUES(expires_at)
-    `));
+
+    await db.insert(aiZohoConfig).values({
+      id: 'global',
+      clientId,
+      clientSecret,
+      refreshToken: refresh_token,
+      accessToken: access_token,
+      expiresAt,
+    }).onDuplicateKeyUpdate({
+      set: {
+        clientId,
+        clientSecret,
+        refreshToken: refresh_token,
+        accessToken: access_token,
+        expiresAt,
+      }
+    });
 
     return sendRedirect(event, '/admin/ai-settings?zoho=connected');
 

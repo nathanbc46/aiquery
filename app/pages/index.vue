@@ -480,6 +480,11 @@ onMounted(async () => {
   } catch { /* ใช้ default agentic */ }
 })
 
+onUnmounted(() => {
+  generateAbortController.value?.abort()
+  previewAbortController.value?.abort()
+})
+
 const { data: systemConfig } = useFetch<any>('/api/system-config')
 const suggestions = computed(() => systemConfig.value?.suggestions || [])
 
@@ -965,6 +970,8 @@ const handleStreamEvent = (ev: any) => {
     case 'error':
       error.value = ev.message || 'เกิดข้อผิดพลาดในการประมวลผล'
       break
+    default:
+      console.warn('[stream] unknown event type:', ev.type, ev)
   }
 }
 
@@ -1469,7 +1476,7 @@ const submitDirectSql = async () => {
   directSqlError.value = ''
   sqlFixSuggestion.value = null
   editableSql.value = formatSql(directSql.value)
-  generatedResult.value = { sql: directSql.value, explanation: 'กำลังวิเคราะห์คำสั่ง SQL...', status: 'success' }
+  generatedResult.value = { sql: directSql.value, explanation: 'กำลังวิเคราะห์คำสั่ง SQL...', status: 'pending' }
   showPreview.value = false
   isResultFullscreen.value = true
   activeTab.value = 1
