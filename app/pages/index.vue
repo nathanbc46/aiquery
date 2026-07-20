@@ -937,6 +937,7 @@ const handleStreamEvent = (ev: any) => {
       break
     case 'clarification':
       generatedResult.value = { status: 'clarification_needed', explanation: ev.explanation }
+      activeTab.value = 2
       toast.info('AI มีข้อสงสัย', 'โปรดให้รายละเอียดเพิ่มเติมตามที่ AI แนะนำ')
       break
     case 'done':
