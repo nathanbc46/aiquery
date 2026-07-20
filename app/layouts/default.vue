@@ -60,16 +60,8 @@ const fetchStatus = async () => {
   }
 }
 
-let statusInterval: any = null
-
 onMounted(() => {
   fetchStatus()
-  // อัปเดตสถานะอัตโนมัติทุก 30 วินาที
-  statusInterval = setInterval(fetchStatus, 30000)
-})
-
-onUnmounted(() => {
-  if (statusInterval) clearInterval(statusInterval)
 })
 
 const navItems = computed(() => {

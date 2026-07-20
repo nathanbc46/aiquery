@@ -13,8 +13,20 @@ import { getAuthSession } from '../../utils/auth'
 import { TOOL_DECLARATIONS, dispatchTool } from '../../utils/schemaTools'
 import { logTokenUsage } from '../../utils/tokenLogger'
 
-// MAX_ITERATIONS ถูก override จาก admin settings (agenticMaxIterations)
 const FORBIDDEN_KEYWORDS = ['UPDATE', 'DELETE', 'DROP', 'TRUNCATE', 'ALTER', 'INSERT', 'EXEC']
+
+const GEMINI_TIMEOUT_MS = 90_000
+
+function withTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`AI ไม่ตอบสนองภายใน ${GEMINI_TIMEOUT_MS / 1000} วินาที (${label})`)),
+      GEMINI_TIMEOUT_MS
+    )
+  })
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer))
+}
 
 function cleanJson(text: string): string {
   let t = text.trim()
@@ -110,7 +122,7 @@ export default defineEventHandler(async (event) => {
       })
 
       const chat = model.startChat({ tools: [{ functionDeclarations: TOOL_DECLARATIONS }] })
-      let chatResult = await chat.sendMessage(finalPrompt)
+      let chatResult = await withTimeout(chat.sendMessage(finalPrompt), 'initial')
       let iteration = 0
 
       // เก็บผลการสำรวจ schema ระหว่าง agentic loop
@@ -165,7 +177,7 @@ export default defineEventHandler(async (event) => {
           })
         }
 
-        chatResult = await chat.sendMessage(toolResponses)
+        chatResult = await withTimeout(chat.sendMessage(toolResponses), `iteration-${iteration}`)
         iteration++
       }
 
@@ -180,7 +192,7 @@ export default defineEventHandler(async (event) => {
               response: { result: { note: 'Tool call limit reached. Generate SQL from information gathered so far.' } }
             }
           }))
-          chatResult = await chat.sendMessage(dummyResponses)
+          chatResult = await withTimeout(chat.sendMessage(dummyResponses), 'dummy-flush')
         }
       }
 
@@ -191,8 +203,9 @@ export default defineEventHandler(async (event) => {
         const rawText = chatResult.response.text?.() ?? ''
         if (stillHasFnCalls || !rawText.trim()) {
           console.warn('[Stream] Response is empty or still has function calls after loop — forcing final JSON prompt')
-          chatResult = await chat.sendMessage(
-            'Stop using tools. Based on all information gathered so far, generate the final SQL query immediately as a JSON object with exactly these keys: "status", "sql", "explanation". Output only pure JSON with no markdown or code blocks.'
+          chatResult = await withTimeout(
+            chat.sendMessage('Stop using tools. Based on all information gathered so far, generate the final SQL query immediately as a JSON object with exactly these keys: "status", "sql", "explanation". Output only pure JSON with no markdown or code blocks.'),
+            'force-final'
           )
         }
       }
