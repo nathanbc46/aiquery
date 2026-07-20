@@ -48,7 +48,9 @@ import {
   Zap,
   FileText,
   Table2,
-  Layers
+  Layers,
+  Check,
+  Pencil
 } from 'lucide-vue-next'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
@@ -218,6 +220,15 @@ const isFetchingFavorites = ref(false)
 const isSavingFavorite = ref(false)
 const isFavoriteModalOpen = ref(false)
 const favoriteTitle = ref('')
+const currentFavoriteId = ref<string | null>(null)
+const currentFavoriteTitle = ref('')
+const currentFavoriteExplanation = ref('')
+const isUpdatingFavorite = ref(false)
+const isAllFavoritesModalOpen = ref(false)
+const favoritesSearchQuery = ref('')
+const editingFavoriteId = ref<string | null>(null)
+const editingFavoriteTitle = ref('')
+const isRenamingFavorite = ref(false)
 
 // CSV download confirmation modal
 const isCsvConfirmModalOpen = ref(false)
@@ -234,6 +245,14 @@ const zohoResultLink = ref('')
 
 
 
+
+watch(isAllFavoritesModalOpen, (val) => {
+  if (!val) {
+    favoritesSearchQuery.value = ''
+    editingFavoriteId.value = null
+    editingFavoriteTitle.value = ''
+  }
+})
 
 watch(generatedResult, (newVal, oldVal) => {
   if (!newVal || (oldVal && newVal !== oldVal)) {
@@ -457,18 +476,85 @@ const confirmDeleteFavorite = async () => {
 const submitBtnRef = ref<HTMLElement | null>(null)
 
 const useFavorite = (fav: any) => {
-  if (inputMode.value === 'sql') {
-    directSql.value = formatSql(fav.generatedSql || fav.queryText || '')
-    directSqlError.value = ''
-    sqlFixSuggestion.value = null
-    return
-  }
+  currentFavoriteId.value = fav.id
+  currentFavoriteTitle.value = fav.title
+  currentFavoriteExplanation.value = fav.explanationTh || ''
+  isAllFavoritesModalOpen.value = false
+
+  // ใส่ทั้งสอง input เสมอ ให้ผู้ใช้เลือกเองว่าจะรันโหมดไหน
   prompt.value = fav.queryText
-  focusAndEnd()
-  if (window.innerWidth < 1024) {
-    nextTick(() => {
-      submitBtnRef.value?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  directSql.value = formatSql(fav.generatedSql || fav.queryText || '')
+  directSqlError.value = ''
+  sqlFixSuggestion.value = null
+
+  if (inputMode.value === 'natural') {
+    focusAndEnd()
+    if (window.innerWidth < 1024) {
+      nextTick(() => {
+        submitBtnRef.value?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      })
+    }
+  }
+}
+
+const updateFavorite = async () => {
+  if (!currentFavoriteId.value || isUpdatingFavorite.value) return
+  isUpdatingFavorite.value = true
+  try {
+    await $fetch(`/api/favorites/${currentFavoriteId.value}`, {
+      method: 'PATCH',
+      body: {
+        title: currentFavoriteTitle.value,
+        queryText: prompt.value,
+        generatedSql: editableSql.value || generatedResult.value?.sql,
+        explanationTh: generatedResult.value?.explanation
+      }
     })
+    toast.success('อัปเดตแล้ว', `บันทึก "${currentFavoriteTitle.value}" เรียบร้อย`)
+    fetchFavorites()
+  } catch (e: any) {
+    toast.error('ล้มเหลว', 'ไม่สามารถอัปเดตรายการโปรดได้')
+  } finally {
+    isUpdatingFavorite.value = false
+  }
+}
+
+const filteredFavorites = computed(() => {
+  const q = favoritesSearchQuery.value.trim().toLowerCase()
+  if (!q) return favorites.value
+  return favorites.value.filter(f =>
+    f.title.toLowerCase().includes(q) || f.queryText.toLowerCase().includes(q)
+  )
+})
+
+const startRenameFavorite = (fav: any) => {
+  editingFavoriteId.value = fav.id
+  editingFavoriteTitle.value = fav.title
+}
+
+const cancelRenameFavorite = () => {
+  editingFavoriteId.value = null
+  editingFavoriteTitle.value = ''
+}
+
+const confirmRenameFavorite = async (fav: any) => {
+  const newTitle = editingFavoriteTitle.value.trim()
+  if (!newTitle || newTitle === fav.title || isRenamingFavorite.value) return
+  isRenamingFavorite.value = true
+  try {
+    await $fetch(`/api/favorites/${fav.id}`, {
+      method: 'PATCH',
+      body: { title: newTitle }
+    })
+    if (currentFavoriteId.value === fav.id) currentFavoriteTitle.value = newTitle
+    toast.success('เปลี่ยนชื่อแล้ว', newTitle)
+    fetchFavorites()
+  } catch {
+    toast.error('ล้มเหลว', 'ไม่สามารถเปลี่ยนชื่อได้')
+  } finally {
+    isRenamingFavorite.value = false
+    editingFavoriteId.value = null
+    editingFavoriteTitle.value = ''
   }
 }
 
@@ -774,6 +860,9 @@ const clearInput = () => {
   activeTab.value = 1
   isAnalysisPanelOpen.value = true
   isSqlPanelOpen.value = true
+  currentFavoriteId.value = null
+  currentFavoriteTitle.value = ''
+  currentFavoriteExplanation.value = ''
   clearFile()
   if (textareaRef.value) textareaRef.value.focus()
 }
@@ -1231,6 +1320,9 @@ const generateSql = async () => {
   activeTab.value = 1
   isAnalysisPanelOpen.value = true
   isSqlPanelOpen.value = true
+  currentFavoriteId.value = null
+  currentFavoriteTitle.value = ''
+  currentFavoriteExplanation.value = ''
   isResultFullscreen.value = true
 
   if (generateAbortController.value) {
@@ -1927,6 +2019,21 @@ const highlightSql = (sqlStr: string) => {
           </div>
         </div>
 
+        <!-- Favorite Active Indicator -->
+        <div v-if="currentFavoriteId" class="flex items-center gap-2 mb-3">
+          <div class="flex items-center gap-1.5 px-3 py-1.5 bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300 text-xs font-bold rounded-full border border-violet-200 dark:border-violet-800/50">
+            <Star class="w-3 h-3 fill-violet-500 shrink-0" />
+            <span class="truncate max-w-[200px]">{{ currentFavoriteTitle }}</span>
+          </div>
+          <button
+            @click="currentFavoriteId = null; currentFavoriteTitle = ''; currentFavoriteExplanation = ''"
+            class="flex items-center justify-center w-5 h-5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors"
+            title="ยกเลิก Favorite นี้"
+          >
+            <X class="w-3.5 h-3.5" />
+          </button>
+        </div>
+
         <div class="space-y-4">
           <div class="relative group">
             <!-- Natural Language Input -->
@@ -1943,7 +2050,7 @@ const highlightSql = (sqlStr: string) => {
 
             <!-- Direct SQL Input -->
             <div v-else class="relative">
-              <div class="direct-sql-editor-wrap sql-editor-wrap rounded-[1.5rem] border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 focus-within:ring-4 focus-within:ring-indigo-500/10 focus-within:border-indigo-400 dark:focus-within:border-indigo-600 transition-colors overflow-hidden shadow-inner" style="min-height: 220px;">
+              <div class="direct-sql-editor-wrap sql-editor-wrap rounded-[1.5rem] border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 focus-within:ring-4 focus-within:ring-indigo-500/10 focus-within:border-indigo-400 dark:focus-within:border-indigo-600 transition-colors shadow-inner" style="min-height: 220px;">
                 <pre ref="directSqlHighlightRef" aria-hidden="true" class="sql-editor-pre dark:!text-slate-200"
                      v-html="directSql ? highlightOnlySql(directSql) : ''"></pre>
                 <textarea
@@ -2003,11 +2110,32 @@ const highlightSql = (sqlStr: string) => {
               </div>
             </div>
 
+            <!-- AI Analysis Summary (แสดงเมื่อโหลด Favorite ใน SQL mode) -->
+            <div
+              v-if="inputMode === 'sql' && currentFavoriteId && currentFavoriteExplanation"
+              class="mt-3 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden"
+            >
+              <div class="w-full flex items-center justify-between px-3 py-2.5 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900">
+                <span class="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.3em] text-slate-500">
+                  <Wand2 class="w-3.5 h-3.5" /> AI Analysis Summary
+                </span>
+                <button @click="copyToClipboard(currentFavoriteExplanation)"
+                  class="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-white dark:bg-slate-800 text-slate-500 hover:text-blue-600 border border-slate-200 dark:border-slate-700 text-[10px] font-bold uppercase tracking-wider transition-all active:scale-95">
+                  <Copy class="w-3 h-3" />
+                  Copy
+                </button>
+              </div>
+              <div class="p-4 bg-white dark:bg-slate-950">
+                <div class="text-slate-700 dark:text-slate-200 text-sm leading-relaxed prose prose-slate dark:prose-invert prose-p:my-2 prose-ul:my-2 max-w-none prose-markdown"
+                  v-html="DOMPurify.sanitize(marked.parse(currentFavoriteExplanation) as string)"></div>
+              </div>
+            </div>
+
             <!-- File Input (Hidden) -->
-            <input 
-              type="file" 
-              ref="fileInputRef" 
-              class="hidden" 
+            <input
+              type="file"
+              ref="fileInputRef"
+              class="hidden"
               accept=".csv, .xlsx, .xls"
               @change="handleFileUpload"
             />
@@ -2135,7 +2263,7 @@ const highlightSql = (sqlStr: string) => {
                 >
                   {{ fav.title }}
                 </button>
-                <button 
+                <button
                   type="button"
                   @click.stop="deleteFavorite(fav)"
                   class="absolute -top-1.5 -right-1.5 w-6 h-6 bg-white dark:bg-slate-800 text-rose-500 rounded-full shadow-lg border border-slate-200 dark:border-slate-700 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-rose-50 dark:hover:bg-rose-900/30"
@@ -2143,6 +2271,14 @@ const highlightSql = (sqlStr: string) => {
                   <Trash2 class="w-3 h-3" />
                 </button>
               </div>
+              <button
+                v-if="favorites.length > 5"
+                type="button"
+                @click="isAllFavoritesModalOpen = true"
+                class="text-[12px] font-bold px-4 py-3 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:bg-violet-600 hover:text-white transition-all active:scale-95 border border-slate-200 dark:border-slate-700"
+              >
+                +{{ favorites.length - 5 }} เพิ่มเติม
+              </button>
             </div>
           </div>
           
@@ -2906,6 +3042,14 @@ const highlightSql = (sqlStr: string) => {
             <div class="flex flex-nowrap items-center justify-center gap-3 w-full sm:w-auto">
               <button @click="isBackConfirmOpen = true" class="px-4 py-3 text-xs font-black text-slate-400 hover:text-rose-600 transition-all uppercase tracking-widest">
                 ยกเลิก
+              </button>
+              <button
+                v-if="currentFavoriteId"
+                @click="updateFavorite"
+                :disabled="isUpdatingFavorite"
+                class="px-5 py-3.5 bg-sky-50 dark:bg-sky-900/20 text-sky-600 dark:text-sky-400 hover:bg-sky-500 hover:text-white transition-all border border-sky-200 dark:border-sky-800/50 text-xs font-black rounded-2xl flex items-center justify-center gap-2 active:scale-95 uppercase tracking-widest whitespace-nowrap disabled:opacity-50">
+                <RotateCcw class="w-3.5 h-3.5" :class="{ 'animate-spin': isUpdatingFavorite }" />
+                <span>อัปเดต "{{ currentFavoriteTitle }}"</span>
               </button>
               <button @click="isFavoriteModalOpen = true"
                 class="px-5 py-3.5 bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 hover:bg-amber-500 hover:text-white transition-all border border-amber-200 dark:border-amber-800/50 text-xs font-black rounded-2xl flex items-center justify-center gap-2 active:scale-95 uppercase tracking-widest whitespace-nowrap">
@@ -3774,6 +3918,96 @@ const highlightSql = (sqlStr: string) => {
       </Teleport>
     </ClientOnly>
 
+
+    <!-- All Favorites Modal -->
+    <ClientOnly>
+      <Teleport to="body">
+        <transition name="modal">
+          <div v-if="isAllFavoritesModalOpen" class="fixed inset-0 z-[140] flex items-center justify-center p-6 bg-slate-900/80" @click.self="isAllFavoritesModalOpen = false">
+            <div class="bg-white dark:bg-slate-900 rounded-[2.5rem] shadow-2xl w-full max-w-lg overflow-hidden border border-slate-200 dark:border-slate-800 animate-in zoom-in-95 duration-300 flex flex-col max-h-[80vh]" @click.stop>
+              <!-- Sticky header + search -->
+              <div class="shrink-0 bg-white dark:bg-slate-900 border-b border-slate-100 dark:border-slate-800">
+                <div class="flex items-center justify-between px-6 py-5">
+                  <div class="flex items-center gap-2">
+                    <Star class="w-5 h-5 fill-violet-500 text-violet-500" />
+                    <h3 class="text-lg font-black text-slate-900 dark:text-white">รายการโปรดทั้งหมด</h3>
+                    <span class="text-xs font-bold px-2 py-0.5 bg-violet-100 dark:bg-violet-900/30 text-violet-600 dark:text-violet-400 rounded-full">{{ favorites.length }}</span>
+                  </div>
+                  <button @click="isAllFavoritesModalOpen = false" class="p-2.5 rounded-2xl hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 transition-all">
+                    <X class="w-5 h-5" />
+                  </button>
+                </div>
+                <!-- Search bar -->
+                <div class="px-4 pb-4">
+                  <div class="flex items-center gap-2 px-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus-within:ring-2 focus-within:ring-violet-500/50 transition-shadow">
+                    <Search class="w-4 h-4 text-slate-400 shrink-0" />
+                    <input
+                      v-model="favoritesSearchQuery"
+                      type="text"
+                      placeholder="ค้นหาจากชื่อหรือคำถาม..."
+                      class="flex-1 py-2.5 text-sm bg-transparent focus:outline-none text-slate-800 dark:text-slate-200 placeholder-slate-400 min-w-0"
+                    />
+                    <button v-if="favoritesSearchQuery" @click="favoritesSearchQuery = ''"
+                      class="p-1.5 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors shrink-0">
+                      <X class="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <div class="overflow-y-auto flex-1 p-4 space-y-2">
+                <p v-if="filteredFavorites.length === 0" class="text-center text-sm text-slate-400 py-8">ไม่พบรายการที่ตรงกัน</p>
+                <div v-for="fav in filteredFavorites" :key="fav.id" class="group flex items-center gap-3 p-4 rounded-2xl border border-slate-100 dark:border-slate-800 hover:border-violet-200 dark:hover:border-violet-800/50 hover:bg-violet-50/50 dark:hover:bg-violet-900/10 transition-all">
+                  <div class="flex-1 min-w-0">
+                    <!-- Inline edit mode -->
+                    <div v-if="editingFavoriteId === fav.id" class="flex items-center gap-2">
+                      <input
+                        v-model="editingFavoriteTitle"
+                        type="text"
+                        class="flex-1 text-sm font-bold px-2 py-1 bg-white dark:bg-slate-800 border border-violet-400 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-500/50 text-slate-800 dark:text-slate-200 min-w-0"
+                        @keydown.enter="confirmRenameFavorite(fav)"
+                        @keydown.escape="cancelRenameFavorite"
+                        autofocus
+                      />
+                      <button @click="confirmRenameFavorite(fav)" :disabled="isRenamingFavorite" class="p-1 text-emerald-600 hover:text-emerald-700 disabled:opacity-50">
+                        <Check class="w-4 h-4" />
+                      </button>
+                      <button @click="cancelRenameFavorite" class="p-1 text-slate-400 hover:text-slate-600">
+                        <X class="w-4 h-4" />
+                      </button>
+                    </div>
+                    <!-- Display mode -->
+                    <div v-else class="flex items-center gap-1.5 min-w-0">
+                      <p class="text-sm font-bold text-slate-800 dark:text-slate-200 truncate">{{ fav.title }}</p>
+                      <button @click="startRenameFavorite(fav)" class="shrink-0 opacity-0 group-hover:opacity-100 p-0.5 text-slate-400 hover:text-violet-500 transition-all">
+                        <Pencil class="w-3 h-3" />
+                      </button>
+                    </div>
+                    <p class="text-xs text-slate-400 dark:text-slate-500 truncate mt-0.5">{{ fav.queryText }}</p>
+                  </div>
+                  <div class="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      @click="useFavorite(fav)"
+                      :disabled="isGenerating"
+                      class="px-3 py-1.5 text-xs font-black bg-violet-600 hover:bg-violet-700 text-white rounded-xl transition-all active:scale-95 disabled:opacity-50 uppercase tracking-wide"
+                    >
+                      โหลด
+                    </button>
+                    <button
+                      type="button"
+                      @click="deleteFavorite(fav)"
+                      class="w-7 h-7 flex items-center justify-center text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/20 rounded-lg transition-all"
+                    >
+                      <Trash2 class="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </transition>
+      </Teleport>
+    </ClientOnly>
 
     <!-- Direct SQL Fullscreen Editor Modal -->
     <ClientOnly>
