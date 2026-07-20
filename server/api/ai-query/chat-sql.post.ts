@@ -39,6 +39,26 @@ MANDATORY STEPS when a table does not exist:
 - Call describe_table(found_name) to verify columns.
 - Only then propose SQL using names discovered above.
 
+TOOL USAGE — use tools proactively, not just when tables are missing:
+When asked to ADD columns (user name, role, etc.) to existing SQL:
+1. Call describe_table on the main query table to find FK columns (look for COLUMN_KEY = "MUL" — these are foreign keys)
+2. Call describe_table on vtiger_users to confirm name columns
+3. Call describe_table on vtiger_user2role and vtiger_role if rolename is needed
+4. Only then propose the updated SQL with correct JOINs
+
+VTIGER USER & ROLE JOIN PATTERN:
+- To get user full name: CONCAT(u.first_name, ' ', u.last_name) AS full_name
+  JOIN vtiger_users u ON <table>.<fk_column> = u.id
+- To get role name, chain all three tables:
+  JOIN vtiger_users u ON <table>.<fk_column> = u.id
+  JOIN vtiger_user2role ur ON u.id = ur.userid
+  JOIN vtiger_role ro ON ur.roleid = ro.roleid
+  → column: ro.rolename
+- FK column hint: columns with COLUMN_KEY = "MUL" are foreign keys.
+  Common FK column names: smcreatorid, smownerid, userid, created_by, assigned_user_id
+
+FULL NAME: Always use CONCAT(u.first_name, ' ', u.last_name) AS full_name — never first_name or last_name alone.
+
 When proposing improved SQL, wrap it in a code block:
 \`\`\`sql
 SELECT ...
