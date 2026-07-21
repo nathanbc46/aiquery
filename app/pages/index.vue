@@ -2026,7 +2026,7 @@ const highlightSql = (sqlStr: string) => {
             <span class="truncate max-w-[200px]">{{ currentFavoriteTitle }}</span>
           </div>
           <button
-            @click="currentFavoriteId = null; currentFavoriteTitle = ''; currentFavoriteExplanation = ''"
+            @click="currentFavoriteId = null; currentFavoriteTitle = ''; currentFavoriteExplanation = ''; prompt = ''; directSql = ''"
             class="flex items-center justify-center w-5 h-5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors"
             title="ยกเลิก Favorite นี้"
           >
