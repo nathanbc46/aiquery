@@ -201,4 +201,22 @@ const handleLogin = async () => {
   opacity: 0;
   transform: translateY(-10px);
 }
+
+/* ทับสี autofill ของ browser ใน light mode */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus {
+  -webkit-box-shadow: 0 0 0 1000px #f8fafc inset !important;
+  -webkit-text-fill-color: #0f172a !important;
+  caret-color: #0f172a;
+}
+
+/* ทับสี autofill ของ browser ใน dark mode */
+:global(.dark) input:-webkit-autofill,
+:global(.dark) input:-webkit-autofill:hover,
+:global(.dark) input:-webkit-autofill:focus {
+  -webkit-box-shadow: 0 0 0 1000px #030712 inset !important;
+  -webkit-text-fill-color: #f8fafc !important;
+  caret-color: #f8fafc;
+}
 </style>
