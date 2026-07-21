@@ -288,6 +288,35 @@ const fetchAllRows = async () => {
   }
 }
 
+const isRefreshingPreview = ref(false)
+const refreshPreview = async () => {
+  if (!generatedResult.value?.sql || isRefreshingPreview.value) return
+  isRefreshingPreview.value = true
+  sortColumn.value = null
+  sortDir.value = 'asc'
+  try {
+    const res: any = await $fetch('/api/ai-query/preview', {
+      method: 'POST',
+      body: { query: generatedResult.value.sql }
+    })
+    if (res.success) {
+      generatedResult.value.previewData = res.data
+      generatedResult.value.previewCount = res.totalCount
+      generatedResult.value.status = 'success'
+      showAllRows.value = false
+      allRowsData.value = []
+      previewSearch.value = ''
+      toast.success('รีโหลดสำเร็จ', `ดึงข้อมูลใหม่ ${res.totalCount.toLocaleString()} รายการจากฐานข้อมูล`)
+    } else {
+      toast.error('รีโหลดไม่สำเร็จ', res.message || 'กรุณาลองใหม่อีกครั้ง')
+    }
+  } catch (err: any) {
+    toast.error('เกิดข้อผิดพลาด', err.message || 'ไม่สามารถดึงข้อมูลได้')
+  } finally {
+    isRefreshingPreview.value = false
+  }
+}
+
 const openCsvModal = () => {
   const today = new Date().toISOString().slice(0, 10).replace(/-/g, '')
   csvFilename.value = `AI_Export_${today}`
@@ -2977,6 +3006,14 @@ const highlightSql = (sqlStr: string) => {
             <X class="w-3 h-3" />
             ตัวอย่าง
           </button>
+          <!-- ปุ่มรีโหลดข้อมูลใหม่ -->
+          <button
+            @click="refreshPreview"
+            :disabled="isRefreshingPreview"
+            :title="'รีโหลดข้อมูลจากฐานข้อมูลใหม่'"
+            class="ml-auto p-2 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:bg-blue-100 dark:hover:bg-blue-900/30 hover:text-blue-600 dark:hover:text-blue-400 transition-all disabled:opacity-50 disabled:cursor-not-allowed">
+            <RotateCcw class="w-4 h-4" :class="{ 'animate-spin': isRefreshingPreview }" />
+          </button>
         </div>
 
         <!-- Zero Records Warning -->
@@ -3026,8 +3063,14 @@ const highlightSql = (sqlStr: string) => {
             <transition name="fade">
               <div v-if="showPreview" :class="isResultFullscreen ? 'flex-1 flex flex-col overflow-hidden min-h-0' : ''">
                 <!-- ตาราง -->
-                <div class="overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-800 bg-white/50 dark:bg-slate-950/50 backdrop-blur-sm custom-scrollbar overflow-y-auto"
-                     :class="isResultFullscreen ? 'flex-1 min-h-0' : 'max-h-[400px]'">
+                <div class="relative overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-800 bg-white/50 dark:bg-slate-950/50 backdrop-blur-sm custom-scrollbar overflow-y-auto"
+                     :class="[isResultFullscreen ? 'flex-1 min-h-0' : 'max-h-[400px]', isRefreshingPreview ? 'opacity-40 pointer-events-none' : '']"
+                     style="transition: opacity 0.2s ease">
+                  <!-- Loading overlay -->
+                  <div v-if="isRefreshingPreview" class="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-white/60 dark:bg-slate-950/60 backdrop-blur-[2px] rounded-2xl">
+                    <RotateCcw class="w-7 h-7 text-blue-500 animate-spin" />
+                    <span class="text-xs font-bold text-slate-500 dark:text-slate-400 tracking-widest uppercase">กำลังดึงข้อมูลใหม่...</span>
+                  </div>
                   <table class="w-full text-left border-collapse">
                     <thead>
                       <tr class="bg-slate-50/50 dark:bg-slate-900/50 sticky top-0 z-10 backdrop-blur-md">
