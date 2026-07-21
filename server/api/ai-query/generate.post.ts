@@ -6,6 +6,7 @@ import { aiSettings } from '../../utils/schema';
 import { getAuthSession } from '../../utils/auth';
 import { pruneSchema } from '../../utils/schemaPruning';
 import { logTokenUsage } from '../../utils/tokenLogger';
+import { guardSensitiveSql } from '../../utils/sqlGuard';
 
 export default defineEventHandler(async (event) => {
   // 1. ตรวจสอบสิทธิ์
@@ -143,13 +144,14 @@ export default defineEventHandler(async (event) => {
     // Basic Security Check (Guardrail)
     const sqlUpper = jsonResult.sql.toUpperCase();
     const forbiddenKeywords = ['UPDATE', 'DELETE', 'DROP', 'TRUNCATE', 'ALTER', 'INSERT', 'EXEC'];
-    
+
     for (const keyword of forbiddenKeywords) {
       const regex = new RegExp(`\\b${keyword}\\b`);
       if (regex.test(sqlUpper)) {
         throw new Error(`Security Violation: The generated SQL contains forbidden keyword '${keyword}'.`);
       }
     }
+    guardSensitiveSql(jsonResult.sql);
 
     // --- Hard Limit Enforcement ---
     let finalSql = jsonResult.sql.trim().replace(/;$/, '');

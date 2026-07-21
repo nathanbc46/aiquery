@@ -3,6 +3,7 @@ import { sql, eq } from 'drizzle-orm'
 import { getAuthSession } from '../../utils/auth'
 import { aiSettings } from '../../utils/schema'
 import { DEFAULT_MAX_RESULTS_LIMIT } from '../../utils/constants'
+import { guardSensitiveSql } from '../../utils/sqlGuard'
 
 export default defineEventHandler(async (event) => {
   // 1. ตรวจสอบสิทธิ์
@@ -29,6 +30,7 @@ export default defineEventHandler(async (event) => {
       statusMessage: 'Only SELECT queries are allowed for preview'
     })
   }
+  guardSensitiveSql(query)
 
   // Remove trailing semicolon if any (prevent syntax error when appending LIMIT)
   let cleanSql = query.trim().replace(/;$/, '')

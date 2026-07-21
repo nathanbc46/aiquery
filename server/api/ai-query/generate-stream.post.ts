@@ -12,6 +12,7 @@ import { aiSettings } from '../../utils/schema'
 import { getAuthSession } from '../../utils/auth'
 import { TOOL_DECLARATIONS, dispatchTool } from '../../utils/schemaTools'
 import { logTokenUsage } from '../../utils/tokenLogger'
+import { assertNoSensitiveSql } from '../../utils/sqlGuard'
 
 const FORBIDDEN_KEYWORDS = ['UPDATE', 'DELETE', 'DROP', 'TRUNCATE', 'ALTER', 'INSERT', 'EXEC']
 
@@ -42,6 +43,7 @@ function enforceSecurity(rawSql: string): string {
       throw new Error(`Security Violation: generated SQL contains forbidden keyword '${kw}'`)
     }
   }
+  assertNoSensitiveSql(rawSql)
   return rawSql
 }
 

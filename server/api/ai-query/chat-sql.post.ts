@@ -7,6 +7,7 @@ import { getAuthSession } from '../../utils/auth'
 import { DEFAULT_AGENTIC_MODEL } from '../../utils/constants'
 import { dispatchTool, TOOL_DECLARATIONS } from '../../utils/schemaTools'
 import { logTokenUsage } from '../../utils/tokenLogger'
+import { assertNoSensitiveSql } from '../../utils/sqlGuard'
 
 // ไม่รวม sample_data — ไม่เหมาะกับ chat context (ป้องกันข้อมูล sensitive รั่ว)
 const CHAT_TOOL_DECLARATIONS = TOOL_DECLARATIONS.filter(t => t.name !== 'sample_data')
@@ -74,6 +75,7 @@ function extractSql(text: string): string | undefined {
   for (const kw of FORBIDDEN_KEYWORDS) {
     if (new RegExp(`\\b${kw}\\b`).test(upper)) return undefined
   }
+  try { assertNoSensitiveSql(sql) } catch { return undefined }
   return sql
 }
 

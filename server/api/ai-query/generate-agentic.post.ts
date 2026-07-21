@@ -13,6 +13,7 @@ import { getAuthSession } from '../../utils/auth'
 import { TOOL_DECLARATIONS, dispatchTool } from '../../utils/schemaTools'
 import { pruneSchema } from '../../utils/schemaPruning'
 import { logTokenUsage } from '../../utils/tokenLogger'
+import { guardSensitiveSql } from '../../utils/sqlGuard'
 
 const FORBIDDEN_KEYWORDS = ['UPDATE', 'DELETE', 'DROP', 'TRUNCATE', 'ALTER', 'INSERT', 'EXEC']
 
@@ -160,6 +161,7 @@ export default defineEventHandler(async (event) => {
         throw new Error(`Security Violation: generated SQL contains forbidden keyword '${kw}'`)
       }
     }
+    guardSensitiveSql(jsonResult.sql || '')
 
     // Hard limit enforcement
     let finalSql = (jsonResult.sql || '').trim().replace(/;$/, '')

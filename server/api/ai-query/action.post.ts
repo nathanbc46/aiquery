@@ -5,6 +5,7 @@ import { getAuthSession, requireAuthRole } from '../../utils/auth';
 import { sendEmail } from '../../utils/mail';
 import { Parser } from '@json2csv/plainjs';
 import { DEFAULT_MAX_RESULTS_LIMIT } from '../../utils/constants';
+import { guardSensitiveSql } from '../../utils/sqlGuard';
 
 const escapeHtml = (str: string) =>
   str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
@@ -34,6 +35,7 @@ export default defineEventHandler(async (event) => {
       const globalLimit = settingsList[0]?.maxResultsLimit || DEFAULT_MAX_RESULTS_LIMIT;
 
       // 2.3 รัน SQL จริง
+      guardSensitiveSql(request.generatedSql);
       let sqlToRun = request.generatedSql.trim().replace(/;$/, '');
       const limitMatch = sqlToRun.match(/LIMIT\s+(\d+)/i);
       if (limitMatch && limitMatch[1]) {

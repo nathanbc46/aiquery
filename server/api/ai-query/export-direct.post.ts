@@ -4,6 +4,7 @@ import { getAuthSession } from '../../utils/auth';
 import { aiSettings } from '../../utils/schema';
 import { Parser } from '@json2csv/plainjs';
 import { DEFAULT_MAX_RESULTS_LIMIT } from '../../utils/constants';
+import { guardSensitiveSql } from '../../utils/sqlGuard';
 
 export default defineEventHandler(async (event) => {
   const session = await getAuthSession(event);
@@ -23,6 +24,7 @@ export default defineEventHandler(async (event) => {
   if (!upperSql.startsWith('SELECT') && !upperSql.startsWith('WITH')) {
     throw createError({ statusCode: 403, statusMessage: 'Only SELECT queries are allowed' });
   }
+  guardSensitiveSql(query);
 
   const cleanSql = query.trim().replace(/;$/, '');
 

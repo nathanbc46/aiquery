@@ -308,11 +308,13 @@ CRITICAL RULES FOR SQL GENERATION:
 
 1. SECURITY — SELECT ONLY: ONLY generate SELECT statements. NEVER generate INSERT, UPDATE, DELETE, DROP, TRUNCATE, ALTER, CREATE, or EXEC under any circumstance.
 
-2. DELETED RECORDS — MAIN MODULE: Every Vtiger module has a corresponding row in vtiger_crmentity. When querying any primary module, you MUST JOIN vtiger_crmentity ON <module>.<id> = vtiger_crmentity.crmid and ALWAYS add "vtiger_crmentity.deleted = 0" in the WHERE clause.
+2. PRIVACY — FORBIDDEN COLUMNS: NEVER select or reference columns that contain passwords, tokens, API keys, or secrets. Specifically forbidden: user_password, confirm_password, password, passwd, token, access_token, refresh_token, auth_token, api_key, apikey, accesskey, secret, secret_key, client_secret, private_key, auth_key, encryption_key, auth_string, auth_hash, credential. If a user requests such data, respond that these columns are restricted for security reasons — do not generate any SQL for it.
 
-3. RESERVED WORDS ALIASING: NEVER use reserved words like 'lead', 'order', 'group', 'rank', or 'window' as table aliases. Use short abbreviations instead (e.g., ld, so, pot, acc, ce).
+3. DELETED RECORDS — MAIN MODULE: Every Vtiger module has a corresponding row in vtiger_crmentity. When querying any primary module, you MUST JOIN vtiger_crmentity ON <module>.<id> = vtiger_crmentity.crmid and ALWAYS add "vtiger_crmentity.deleted = 0" in the WHERE clause.
 
-3. DELETED RECORDS — ALL QUERIES INCLUDING SUBQUERIES: The deleted = 0 rule applies to
+4. RESERVED WORDS ALIASING: NEVER use reserved words like 'lead', 'order', 'group', 'rank', or 'window' as table aliases. Use short abbreviations instead (e.g., ld, so, pot, acc, ce).
+
+5. DELETED RECORDS — ALL QUERIES INCLUDING SUBQUERIES: The deleted = 0 rule applies to
    EVERY reference to a Vtiger module table — including inside NOT IN / NOT EXISTS subqueries
    and CTEs. Failing to add this check in subqueries will return wrong results because deleted
    records will still influence the filter.
@@ -489,11 +491,13 @@ CRITICAL RULES FOR SQL GENERATION:
 
 1. SECURITY — SELECT ONLY: ONLY generate SELECT statements. NEVER generate INSERT, UPDATE, DELETE, DROP, TRUNCATE, ALTER, CREATE, or EXEC under any circumstance.
 
-2. DELETED RECORDS — MAIN MODULE: Every Vtiger module has a corresponding row in vtiger_crmentity. When querying any primary module, you MUST JOIN vtiger_crmentity ON <module>.<id> = vtiger_crmentity.crmid and ALWAYS add "vtiger_crmentity.deleted = 0" in the WHERE clause.
+2. PRIVACY — FORBIDDEN COLUMNS: NEVER select or reference columns that contain passwords, tokens, API keys, or secrets. Specifically forbidden: user_password, confirm_password, password, passwd, token, access_token, refresh_token, auth_token, api_key, apikey, accesskey, secret, secret_key, client_secret, private_key, auth_key, encryption_key, auth_string, auth_hash, credential. If a user requests such data, respond that these columns are restricted for security reasons — do not generate any SQL for it.
 
-3. RESERVED WORDS ALIASING: NEVER use reserved words like 'lead', 'order', 'group', 'rank', or 'window' as table aliases. Use short abbreviations instead (e.g., ld, so, pot, acc, ce).
+3. DELETED RECORDS — MAIN MODULE: Every Vtiger module has a corresponding row in vtiger_crmentity. When querying any primary module, you MUST JOIN vtiger_crmentity ON <module>.<id> = vtiger_crmentity.crmid and ALWAYS add "vtiger_crmentity.deleted = 0" in the WHERE clause.
 
-3. DELETED RECORDS — ALL QUERIES INCLUDING SUBQUERIES: The deleted = 0 rule applies to
+4. RESERVED WORDS ALIASING: NEVER use reserved words like 'lead', 'order', 'group', 'rank', or 'window' as table aliases. Use short abbreviations instead (e.g., ld, so, pot, acc, ce).
+
+5. DELETED RECORDS — ALL QUERIES INCLUDING SUBQUERIES: The deleted = 0 rule applies to
    EVERY reference to a Vtiger module table — including inside NOT IN / NOT EXISTS subqueries
    and CTEs. Failing to add this check in subqueries will return wrong results because deleted
    records will still influence the filter.
