@@ -885,13 +885,37 @@ const isFetchingAllRows = ref(false)
 const allRowsData = ref<any[]>([])
 const resultSection = ref<HTMLElement | null>(null)
 
+const sortColumn = ref<string | null>(null)
+const sortDir = ref<'asc' | 'desc'>('asc')
+
+const toggleSort = (col: string) => {
+  if (sortColumn.value === col) {
+    sortDir.value = sortDir.value === 'asc' ? 'desc' : 'asc'
+  } else {
+    sortColumn.value = col
+    sortDir.value = 'asc'
+  }
+}
+
 const filteredPreviewData = computed(() => {
   const data = showAllRows.value ? allRowsData.value : (generatedResult.value?.previewData ?? [])
-  if (!previewSearch.value.trim()) return data
-  const q = previewSearch.value.toLowerCase()
-  return data.filter((row: any) =>
-    Object.values(row).some(v => String(v ?? '').toLowerCase().includes(q))
-  )
+  const q = previewSearch.value.trim().toLowerCase()
+  const filtered = q
+    ? data.filter((row: any) => Object.values(row).some(v => String(v ?? '').toLowerCase().includes(q)))
+    : data
+
+  if (!sortColumn.value) return filtered
+
+  const col = sortColumn.value
+  const dir = sortDir.value === 'asc' ? 1 : -1
+  return [...filtered].sort((a: any, b: any) => {
+    const av = a[col] ?? ''
+    const bv = b[col] ?? ''
+    if (av === bv) return 0
+    if (av === null || av === '') return 1
+    if (bv === null || bv === '') return -1
+    return (av < bv ? -1 : 1) * dir
+  })
 })
 
 const formatCellValue = (val: any, key?: string | number): string => {
@@ -3007,8 +3031,16 @@ const highlightSql = (sqlStr: string) => {
                   <table class="w-full text-left border-collapse">
                     <thead>
                       <tr class="bg-slate-50/50 dark:bg-slate-900/50 sticky top-0 z-10 backdrop-blur-md">
-                        <th v-for="(val, key) in (filteredPreviewData?.[0] ?? generatedResult.previewData?.[0] ?? {})" :key="key" class="px-5 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest border-b border-slate-200 dark:border-slate-800">
-                          {{ key }}
+                        <th v-for="(val, key) in (filteredPreviewData?.[0] ?? generatedResult.previewData?.[0] ?? {})" :key="key"
+                          @click="toggleSort(String(key))"
+                          class="px-5 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest border-b border-slate-200 dark:border-slate-800 cursor-pointer select-none hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-100/60 dark:hover:bg-slate-800/60 transition-colors whitespace-nowrap">
+                          <span class="flex items-center gap-1">
+                            {{ key }}
+                            <span v-if="sortColumn === String(key)" class="text-blue-500">
+                              {{ sortDir === 'asc' ? '▲' : '▼' }}
+                            </span>
+                            <span v-else class="opacity-0 group-hover:opacity-30">▲</span>
+                          </span>
                         </th>
                       </tr>
                     </thead>
