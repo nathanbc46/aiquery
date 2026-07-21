@@ -55,6 +55,16 @@ const copyZohoShareInfo = (req: any) => {
   toast.success('คัดลอกแล้ว', 'คัดลอก Share Link และรหัสผ่านเรียบร้อย')
 }
 
+const openShareLink = async (req: any) => {
+  window.open(req.zohoShareLink, '_blank', 'noopener')
+  try {
+    await $fetch('/api/ai-query/track-download', { method: 'POST', body: { id: req.id } })
+    req.downloadCount = (req.downloadCount || 0) + 1
+  } catch {
+    // ไม่ block user แม้นับไม่สำเร็จ
+  }
+}
+
 const openEditZoho = (req: any) => {
   editZohoRequestId.value = req.id
   editZohoLink.value = req.zohoLink || ''
@@ -748,9 +758,9 @@ onMounted(() => {
                 <!-- ทุก role: Share Link + Password -->
                 <div v-if="req.zohoShareLink" class="bg-emerald-50/50 dark:bg-emerald-900/5 border border-emerald-100 dark:border-emerald-800/50 rounded-2xl p-3 space-y-2">
                   <div class="flex items-center gap-2">
-                    <a :href="req.zohoShareLink" target="_blank" rel="noopener" class="w-9 h-9 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white flex items-center justify-center shadow-lg shadow-emerald-600/20 transition-all active:scale-90 shrink-0">
+                    <button @click="openShareLink(req)" class="w-9 h-9 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white flex items-center justify-center shadow-lg shadow-emerald-600/20 transition-all active:scale-90 shrink-0">
                       <Link class="w-4 h-4" />
-                    </a>
+                    </button>
                     <div class="min-w-0 flex-1">
                       <p class="text-[9px] font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-widest">Share Link</p>
                       <p class="text-[10px] text-slate-400 truncate">{{ (req.resultCount || 0).toLocaleString() }} รายการ</p>
