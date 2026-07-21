@@ -1574,22 +1574,28 @@ const submitDirectSql = async () => {
   directSqlError.value = ''
   sqlFixSuggestion.value = null
   editableSql.value = formatSql(directSql.value)
-  generatedResult.value = { sql: directSql.value, explanation: 'กำลังวิเคราะห์คำสั่ง SQL...', status: 'pending' }
+
+  // ถ้าโหลดจาก favorite ที่มี explanation อยู่แล้ว ใช้เลย ไม่เรียก explain-sql ซ้ำ
+  const cachedExplanation = (currentFavoriteId.value && currentFavoriteExplanation.value)
+    ? currentFavoriteExplanation.value : null
+
+  generatedResult.value = { sql: directSql.value, explanation: cachedExplanation || 'กำลังวิเคราะห์คำสั่ง SQL...', status: 'pending' }
   showPreview.value = false
   isResultFullscreen.value = true
   activeTab.value = 1
 
   try {
-    const [previewRes, explainRes] = await Promise.all([
+    const fetchList: Promise<any>[] = [
       $fetch<any>('/api/ai-query/preview', {
         method: 'POST',
         body: { query: directSql.value }
       }),
-      $fetch<any>('/api/ai-query/explain-sql', {
+      ...(!cachedExplanation ? [$fetch<any>('/api/ai-query/explain-sql', {
         method: 'POST',
         body: { sql: directSql.value }
-      })
-    ])
+      })] : [])
+    ]
+    const [previewRes, explainRes] = await Promise.all(fetchList)
 
     if (previewRes.success) {
       generatedResult.value.previewData = previewRes.data
@@ -1601,7 +1607,9 @@ const submitDirectSql = async () => {
       showAllRows.value = false
       allRowsData.value = []
 
-      if (explainRes.success) {
+      if (cachedExplanation) {
+        generatedResult.value.explanation = cachedExplanation
+      } else if (explainRes?.success) {
         generatedResult.value.explanation = explainRes.explanation
         prompt.value = explainRes.humanReadable
       } else {
