@@ -119,6 +119,7 @@ const generateAbortController = ref<AbortController | null>(null)
 const previewAbortController = ref<AbortController | null>(null)
 const isCancelled = ref(false)
 const reasoningSteps = ref<string[]>([])
+const generateStatusText = ref('กำลังประมวลผล...')
 
 // Streaming agentic state
 const liveSteps = ref<Array<{
@@ -1023,6 +1024,12 @@ const handleStreamEvent = (ev: any) => {
       if (step) { step.status = 'done'; step.stepElapsed = ev.stepElapsed }
       break
     }
+    case 'generating':
+      generateStatusText.value = 'กำลังสร้าง SQL...'
+      break
+    case 'validating':
+      generateStatusText.value = 'กำลังตรวจสอบ SQL...'
+      break
     case 'sql_ready':
       sqlReady.value = true
       break
@@ -1031,8 +1038,6 @@ const handleStreamEvent = (ev: any) => {
       break
     case 'clarification':
       generatedResult.value = { status: 'clarification_needed', explanation: ev.explanation }
-      activeTab.value = 2
-      toast.info('AI มีข้อสงสัย', 'โปรดให้รายละเอียดเพิ่มเติมตามที่ AI แนะนำ')
       break
     case 'done':
       generatedResult.value = {
@@ -1313,6 +1318,7 @@ const generateSql = async () => {
   error.value = null
   showPreview.value = false
   liveSteps.value = []
+  generateStatusText.value = 'กำลังประมวลผล...'
   validateResult.value = null
   sqlReady.value = false
   editableSql.value = ''
@@ -1974,8 +1980,8 @@ const highlightSql = (sqlStr: string) => {
           <span class="text-[11px] text-slate-400 font-medium truncate max-w-lg">{{ prompt }}</span>
         </div>
 
-        <!-- Form Content — ซ่อนเมื่อกำลัง generate หรือ result พร้อมแล้ว -->
-        <div v-show="!isGenerating && !generatedResult" class="space-y-4">
+        <!-- Form Content — ซ่อนเมื่อกำลัง generate หรือ result พร้อมแล้ว (ยกเว้น clarification_needed ให้แสดงต่อ) -->
+        <div v-show="!isGenerating && (!generatedResult || generatedResult?.status === 'clarification_needed')" class="space-y-4">
 
         <!-- Row 1: Mode Switcher + Label + Security Policy (same row) -->
         <div class="flex items-center gap-3 flex-wrap">
@@ -2311,7 +2317,7 @@ const highlightSql = (sqlStr: string) => {
                 <!-- สถานะกำลังประมวลผล -->
                 <div class="flex items-center gap-2 px-4 py-2 rounded-2xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
                   <Loader2 class="w-4 h-4 animate-spin text-violet-500" />
-                  <span class="text-sm font-semibold text-slate-600 dark:text-slate-300">กำลังประมวลผล...</span>
+                  <span class="text-sm font-semibold text-slate-600 dark:text-slate-300">{{ generateStatusText }}</span>
                 </div>
                 <!-- ปุ่ม Stop -->
                 <button
@@ -2448,7 +2454,7 @@ const highlightSql = (sqlStr: string) => {
     </section>
 
     <!-- Tabbed Result Container -->
-    <div v-if="isGenerating || isUpdatingSql || liveSteps.length || generatedResult" ref="resultSection"
+    <div v-if="(isGenerating || isUpdatingSql || liveSteps.length || generatedResult) && generatedResult?.status !== 'clarification_needed'" ref="resultSection"
          :class="isResultFullscreen
            ? 'result-fullscreen fixed inset-0 z-50 flex flex-col bg-white dark:bg-slate-950 overflow-hidden'
            : 'rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 shadow-md overflow-hidden'">
