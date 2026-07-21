@@ -227,7 +227,10 @@ export default defineEventHandler(async (event) => {
         reply = 'AI ไม่สามารถสร้างคำตอบได้ กรุณาลองใหม่อีกครั้ง'
       }
       const updatedSql = extractSql(reply)
-      await send({ type: 'done', reply, updatedSql })
+      const displayReply = updatedSql
+        ? reply.replace(/```sql[\s\S]*?```/gi, '').replace(/\n{3,}/g, '\n\n').trim()
+        : reply
+      await send({ type: 'done', reply: displayReply, updatedSql })
 
     } catch (err: any) {
       console.error('[chat-sql] Error:', err)
