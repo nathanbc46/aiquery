@@ -2050,13 +2050,13 @@ const highlightSql = (sqlStr: string) => {
               :readonly="isGenerating"
               @keydown.enter.exact.prevent="generateSql()"
               placeholder="เช่น ขอลูกค้าที่มียอดสั่งซื้อเกิน 1 แสนบาทในปีนี้ พร้อมเบอร์ติดต่อ... (Enter เพื่อประมวลผล)"
-              class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-[1.5rem] px-6 py-5 pr-14 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder:text-slate-600 focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 dark:focus:border-blue-400 transition-[border-color,box-shadow,opacity] resize-y min-h-[160px] lg:min-h-[calc(80vh-336px)] text-lg leading-relaxed shadow-inner disabled:opacity-50"
+              class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-[1.5rem] px-6 py-5 pr-14 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder:text-slate-600 focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 dark:focus:border-blue-400 transition-[border-color,box-shadow,opacity] resize-y min-h-[160px] lg:min-h-[calc(64vh-269px)] text-lg leading-relaxed shadow-inner disabled:opacity-50"
               :disabled="isGenerating"
             ></textarea>
 
             <!-- Direct SQL Input -->
             <div v-else class="relative">
-              <div class="direct-sql-editor-wrap sql-editor-wrap rounded-[1.5rem] border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 focus-within:ring-4 focus-within:ring-indigo-500/10 focus-within:border-indigo-400 dark:focus-within:border-indigo-600 transition-colors shadow-inner min-h-[220px] lg:min-h-[calc(80vh-336px)]">
+              <div class="direct-sql-editor-wrap sql-editor-wrap rounded-[1.5rem] border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 focus-within:ring-4 focus-within:ring-indigo-500/10 focus-within:border-indigo-400 dark:focus-within:border-indigo-600 transition-colors shadow-inner min-h-[220px] lg:min-h-[calc(64vh-269px)]">
                 <pre ref="directSqlHighlightRef" aria-hidden="true" class="sql-editor-pre dark:!text-slate-200"
                      v-html="directSql ? highlightOnlySql(directSql) : ''"></pre>
                 <textarea
@@ -4446,7 +4446,7 @@ textarea::placeholder {
 }
 @media (min-width: 1024px) {
   .direct-sql-editor-wrap .sql-editor-textarea {
-    min-height: calc(80vh - 336px);
+    min-height: calc(64vh - 269px);
   }
 }
 :global(.dark) .direct-sql-editor-wrap .sql-editor-textarea { caret-color: #ffffff; }
