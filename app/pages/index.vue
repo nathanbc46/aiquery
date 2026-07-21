@@ -2235,17 +2235,6 @@ const highlightSql = (sqlStr: string) => {
         
         <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-6 pt-2">
           <div class="flex flex-wrap gap-2 flex-1 min-w-0">
-            <button
-              v-for="text in suggestions"
-              :key="text"
-              type="button"
-              @click="useSuggestion(text)"
-              :disabled="isGenerating"
-              class="text-[12px] font-bold px-4 py-2.5 rounded-xl bg-white dark:bg-slate-800/60 text-slate-700 dark:text-slate-300 hover:bg-indigo-600 hover:text-white dark:hover:bg-indigo-600 dark:hover:text-white transition-all active:scale-95 border border-slate-200 dark:border-slate-700 shadow-sm disabled:opacity-30 disabled:cursor-not-allowed"
-            >
-              {{ text }}
-            </button>
-
             <!-- Favorites List -->
             <div v-if="favorites.length > 0" class="flex flex-wrap gap-2 items-center">
               <div class="w-px h-6 bg-slate-300 dark:bg-slate-700 mx-2 hidden sm:block"></div>
@@ -3556,7 +3545,7 @@ const highlightSql = (sqlStr: string) => {
     <ClientOnly>
       <Teleport to="body">
         <transition name="modal">
-          <div v-if="isSchemaModalOpen" class="fixed inset-0 z-[150] flex items-start justify-center p-4 md:pt-[5vh] bg-slate-900/80" @click.self="isSchemaModalOpen = false">
+          <div v-if="isSchemaModalOpen" class="fixed inset-0 z-[170] flex items-start justify-center p-4 md:pt-[5vh] bg-slate-900/80" @click.self="isSchemaModalOpen = false">
             <div class="bg-white dark:bg-slate-900 rounded-[2rem] shadow-2xl w-full max-w-5xl max-h-[85vh] overflow-hidden flex flex-col self-start border border-slate-200 dark:border-slate-800 animate-in zoom-in-95 duration-300" @click.stop>
               <!-- Header -->
               <div class="px-6 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0 bg-slate-50/50 dark:bg-slate-900/50">
@@ -3885,7 +3874,7 @@ const highlightSql = (sqlStr: string) => {
     <ClientOnly>
       <Teleport to="body">
         <transition name="modal">
-          <div v-if="isDeleteConfirmModalOpen" class="fixed inset-0 z-[140] flex items-center justify-center p-6 bg-slate-900/80">
+          <div v-if="isDeleteConfirmModalOpen" class="fixed inset-0 z-[160] flex items-center justify-center p-6 bg-slate-900/80">
             <div class="bg-white dark:bg-slate-900 rounded-[2.5rem] shadow-2xl w-full max-w-sm overflow-hidden border border-slate-200 dark:border-slate-800 animate-in zoom-in-95 duration-300" @click.stop>
               <div class="p-8 text-center space-y-6">
                 <div class="w-20 h-20 bg-rose-50 dark:bg-rose-900/20 rounded-full flex items-center justify-center text-rose-500 mx-auto border border-rose-100 dark:border-rose-800/50">
@@ -3923,8 +3912,8 @@ const highlightSql = (sqlStr: string) => {
     <ClientOnly>
       <Teleport to="body">
         <transition name="modal">
-          <div v-if="isAllFavoritesModalOpen" class="fixed inset-0 z-[140] flex items-center justify-center p-6 bg-slate-900/80" @click.self="isAllFavoritesModalOpen = false">
-            <div class="bg-white dark:bg-slate-900 rounded-[2.5rem] shadow-2xl w-full max-w-lg overflow-hidden border border-slate-200 dark:border-slate-800 animate-in zoom-in-95 duration-300 flex flex-col max-h-[80vh]" @click.stop>
+          <div v-if="isAllFavoritesModalOpen" class="fixed inset-0 z-[140] flex items-start justify-center p-6 pt-[8vh] bg-slate-900/80" @click.self="isAllFavoritesModalOpen = false">
+            <div class="bg-white dark:bg-slate-900 rounded-[2.5rem] shadow-2xl w-full max-w-lg overflow-hidden border border-slate-200 dark:border-slate-800 animate-in zoom-in-95 duration-300 flex flex-col max-h-[80vh] self-start" @click.stop>
               <!-- Sticky header + search -->
               <div class="shrink-0 bg-white dark:bg-slate-900 border-b border-slate-100 dark:border-slate-800">
                 <div class="flex items-center justify-between px-6 py-5">
@@ -4040,6 +4029,14 @@ const highlightSql = (sqlStr: string) => {
                   title="ล้าง SQL"
                 >
                   <Trash2 class="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  @click="openSchemaModal()"
+                  class="p-1.5 rounded-lg text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 border border-slate-200 dark:border-slate-700 hover:border-emerald-300 dark:hover:border-emerald-700 transition-all"
+                  title="สำรวจตารางและฟิลด์ (Schema Explorer)"
+                >
+                  <Table2 class="w-4 h-4" />
                 </button>
                 <div class="w-px h-5 bg-slate-200 dark:bg-slate-700 mx-1"></div>
                 <button
