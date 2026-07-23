@@ -115,16 +115,6 @@ const showZohoPassword = ref(false)
 const isExportingZoho = ref(false)
 const generatedZohoLink = ref('')
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
-
-const autoResizeTextarea = () => {
-  const el = textareaRef.value
-  if (!el) return
-  el.style.height = 'auto'
-  el.style.height = Math.max(el.scrollHeight, 120) + 'px'
-}
-
-watch(() => prompt.value, () => nextTick(autoResizeTextarea))
-onMounted(() => nextTick(autoResizeTextarea))
 const generateAbortController = ref<AbortController | null>(null)
 const previewAbortController = ref<AbortController | null>(null)
 const isCancelled = ref(false)
@@ -158,6 +148,16 @@ const isSqlPanelOpen = ref(true)
 const isResultFullscreen = ref(false)
 const isEditingPromptInTab = ref(false)
 const promptEditBuffer = ref('')
+const promptEditBufferRef = ref<HTMLTextAreaElement | null>(null)
+
+const autoResizeEditBuffer = () => {
+  const el = promptEditBufferRef.value
+  if (!el) return
+  el.style.height = 'auto'
+  el.style.height = Math.max(el.scrollHeight, 60) + 'px'
+}
+watch(() => promptEditBuffer.value, () => nextTick(autoResizeEditBuffer))
+watch(isEditingPromptInTab, (val) => { if (val) nextTick(autoResizeEditBuffer) })
 
 // Direct SQL mode
 const inputMode = ref<'natural' | 'sql'>('natural')
@@ -2121,7 +2121,7 @@ const highlightSql = (sqlStr: string) => {
               :readonly="isGenerating"
               @keydown.enter.exact.prevent="generateSql()"
               placeholder="เช่น ขอลูกค้าที่มียอดสั่งซื้อเกิน 1 แสนบาทในปีนี้ พร้อมเบอร์ติดต่อ... (Enter เพื่อประมวลผล)"
-              class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-[1.5rem] px-6 py-5 pr-14 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder:text-slate-600 focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 dark:focus:border-blue-400 transition-[border-color,box-shadow,opacity] resize-none overflow-hidden min-h-[120px] text-lg leading-relaxed shadow-inner disabled:opacity-50"
+              class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-[1.5rem] px-6 py-5 pr-14 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder:text-slate-600 focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 dark:focus:border-blue-400 transition-[border-color,box-shadow,opacity] resize-y min-h-[160px] lg:min-h-[calc(64vh-269px)] text-lg leading-relaxed shadow-inner disabled:opacity-50"
               :disabled="isGenerating"
             ></textarea>
 
@@ -2626,8 +2626,9 @@ const highlightSql = (sqlStr: string) => {
         </div>
         <div v-else class="space-y-2">
           <textarea
+            ref="promptEditBufferRef"
             v-model="promptEditBuffer"
-            class="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 rounded-lg border border-blue-400 dark:border-blue-500 text-sm text-slate-700 dark:text-slate-200 font-medium leading-snug focus:outline-none focus:ring-2 focus:ring-blue-500/20 resize-none min-h-[60px]"
+            class="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 rounded-lg border border-blue-400 dark:border-blue-500 text-sm text-slate-700 dark:text-slate-200 font-medium leading-snug focus:outline-none focus:ring-2 focus:ring-blue-500/20 resize-none min-h-[60px] overflow-hidden"
             @keydown.enter.exact.prevent="prompt = promptEditBuffer; isEditingPromptInTab = false; generateSql()"
             autofocus
           ></textarea>
