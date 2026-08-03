@@ -286,7 +286,7 @@ const fetchAllRows = async () => {
   try {
     const res: any = await $fetch('/api/ai-query/preview', {
       method: 'POST',
-      body: { query: generatedResult.value.sql, fetchAll: true }
+      body: { query: editableSql.value || generatedResult.value.sql, fetchAll: true }
     })
     if (res.success) {
       allRowsData.value = res.data
@@ -307,7 +307,7 @@ const refreshPreview = async () => {
   try {
     const res: any = await $fetch('/api/ai-query/preview', {
       method: 'POST',
-      body: { query: generatedResult.value.sql }
+      body: { query: editableSql.value || generatedResult.value.sql }
     })
     if (res.success) {
       generatedResult.value.previewData = res.data
@@ -354,7 +354,7 @@ const downloadDirect = async () => {
     const response = await fetch('/api/ai-query/export-direct', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query: generatedResult.value.sql, filename: fn })
+      body: JSON.stringify({ query: editableSql.value || generatedResult.value.sql, filename: fn })
     })
 
     if (!response.ok) {
@@ -841,7 +841,7 @@ const handleZohoExport = async () => {
     const response = await $fetch<any>('/api/ai-query/export-zoho', {
       method: 'POST',
       body: {
-        sql: generatedResult.value.sql,
+        sql: editableSql.value || generatedResult.value.sql,
         options: { ...zohoOptions.value, ownerVtigerId: zohoOwnerVtigerId.value, expiresAt: zohoResolvedExpiry, skipEmail: zohoSkipEmail.value },
         requestId: requestResp.requestId
       }
